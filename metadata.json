@@ -1,0 +1,6 @@
+{
+  "name": "Private AI Journal & Reflection",
+  "description": "Secure, private AI-powered journal with multi-turn reflection, smart summarization, goal tracking, and user-isolated insights.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

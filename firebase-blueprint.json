@@ -1,0 +1,91 @@
+{
+  "entities": {
+    "UserProfile": {
+      "collection": "users",
+      "fields": {
+        "userId": "string",
+        "email": "string",
+        "displayName": "string",
+        "photoURL": "string?",
+        "createdAt": "timestamp",
+        "lastLoginAt": "timestamp",
+        "settings": "map"
+      }
+    },
+    "Journal": {
+      "collection": "users/{userId}/journals",
+      "fields": {
+        "id": "string",
+        "userId": "string",
+        "title": "string",
+        "content": "string",
+        "tags": "list",
+        "mood": "string?",
+        "isFavorite": "boolean",
+        "isPinned": "boolean",
+        "isArchived": "boolean",
+        "aiSummary": "string?",
+        "extractedActionItems": "list?",
+        "wordCount": "number",
+        "createdAt": "timestamp",
+        "updatedAt": "timestamp"
+      }
+    },
+    "Conversation": {
+      "collection": "users/{userId}/conversations",
+      "fields": {
+        "id": "string",
+        "userId": "string",
+        "title": "string",
+        "linkedJournalId": "string?",
+        "mode": "string",
+        "summary": "string?",
+        "messageCount": "number",
+        "createdAt": "timestamp",
+        "updatedAt": "timestamp"
+      }
+    },
+    "Message": {
+      "collection": "users/{userId}/conversations/{conversationId}/messages",
+      "fields": {
+        "id": "string",
+        "role": "string",
+        "content": "string",
+        "model": "string",
+        "createdAt": "timestamp"
+      }
+    },
+    "Goal": {
+      "collection": "users/{userId}/goals",
+      "fields": {
+        "id": "string",
+        "userId": "string",
+        "title": "string",
+        "description": "string",
+        "priority": "string",
+        "status": "string",
+        "progress": "number",
+        "targetDate": "string?",
+        "tasks": "list",
+        "createdAt": "timestamp",
+        "updatedAt": "timestamp"
+      }
+    },
+    "Insight": {
+      "collection": "users/{userId}/insights",
+      "fields": {
+        "id": "string",
+        "userId": "string",
+        "periodType": "string",
+        "periodStart": "string",
+        "periodEnd": "string",
+        "keyThemes": "list",
+        "observations": "list",
+        "accomplishments": "list",
+        "suggestedFocusAreas": "list",
+        "isAiGenerated": "boolean",
+        "generatedAt": "timestamp"
+      }
+    }
+  }
+}
