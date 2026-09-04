@@ -20,6 +20,7 @@ import { JournalEntry, MoodType } from '../../types';
 import { sanitizePayload, countWords, parseFirestoreDate } from '../../lib/utils';
 import { AiActionToolbar } from './AiActionToolbar';
 import { VoiceRecorderModal } from './VoiceRecorder';
+import { AiReflectionAssist } from './AiReflectionAssist';
 
 interface JournalEditorProps {
   initialEntry?: JournalEntry | null;
@@ -73,6 +74,13 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
 
   const handleVoiceConfirm = (transcribedText: string) => {
     setContent(prev => (prev ? `${prev}\n\n${transcribedText}` : transcribedText));
+  };
+
+  const handleApplyDraft = (draftTitle: string, draftContent: string) => {
+    if (draftTitle && (!title.trim() || title === 'Untitled Reflection')) {
+      setTitle(draftTitle);
+    }
+    setContent(prev => (prev ? `${prev}\n\n${draftContent}` : draftContent));
   };
 
   const handleSave = async () => {
@@ -239,6 +247,12 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
           </button>
         </div>
       )}
+
+      {/* AI-Assisted Reflection Creation Starter */}
+      <AiReflectionAssist
+        onApplyDraft={handleApplyDraft}
+        onOpenVoiceModal={() => setShowVoiceModal(true)}
+      />
 
       {/* Editor Main Canvas */}
       <div className="bg-white rounded-2xl border border-stone-200/90 shadow-xs p-6 sm:p-8 space-y-6">

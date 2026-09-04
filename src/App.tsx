@@ -222,7 +222,9 @@ function MainApp() {
         {currentTab === 'goals' && (
           <GoalList
             goals={goals}
+            entries={entries}
             onRefresh={() => {}}
+            onNavigateToEditor={handleNewReflection}
           />
         )}
 

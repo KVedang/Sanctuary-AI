@@ -191,6 +191,222 @@ export function synthesizeAskJournal(question: string, excerpts: JournalExcerpt[
 }
 
 /**
+ * Autonomous Local Goal & Task Suggestion Engine
+ * Formulates ONE best actionable goal with 3-5 concrete tasks grounded in the user's reflection,
+ * or returns hasGoal: false if the entry is purely reflective/non-actionable.
+ */
+export function generateLocalGoalSuggestion(content: string, title?: string): {
+  hasGoal: boolean;
+  title?: string;
+  description?: string;
+  reason?: string;
+  priority?: 'low' | 'medium' | 'high';
+  howToAchieve?: string[];
+  tasks?: string[];
+} {
+  const clean = (content || '').trim();
+  const lower = clean.toLowerCase();
+  const sentences = clean.split(/[.!?\n]+/).map(s => s.trim()).filter(s => s.length > 8);
+
+  // Intent patterns: action-oriented verbs and commitments
+  const hasGoalIntent = /goal|plan|need to|want to|start|build|finish|create|implement|learn|schedule|routine|commit|finish|organize|launch|study|practice|improve|fix|write|read/i.test(lower);
+
+  // If reflection is too brief or lacks any action intent, do not force an artificial goal
+  if (!hasGoalIntent || sentences.length === 0) {
+    return {
+      hasGoal: false,
+      reason: 'The reflection is reflective or contemplative in nature without an actionable commitment or intention.',
+    };
+  }
+
+  // Detect focus domain
+  let goalTitle = '';
+  let domainReason = '';
+  let priority: 'low' | 'medium' | 'high' = 'medium';
+
+  if (/asap|deadline|urgent|critical|immediately|overdue/.test(lower)) {
+    priority = 'high';
+  } else if (/someday|eventually|maybe|explore|curious/.test(lower)) {
+    priority = 'low';
+  }
+
+  if (/health|sleep|exercise|workout|walk|diet|energy|rest|burnout/.test(lower)) {
+    goalTitle = 'Restore Energy & Sustainable Wellness Rhythm';
+    domainReason = 'Your reflection highlights physical energy, rest, and well-being as a cornerstone for balance.';
+  } else if (/learn|study|cloud|course|read|exam|skill|code/.test(lower)) {
+    goalTitle = title && !title.toLowerCase().includes('untitled') 
+      ? `Deepen Mastery: ${title}` 
+      : 'Establish Consistent 30-Minute Skill Learning Sessions';
+    domainReason = 'Your entry points toward personal growth, knowledge acquisition, and skill mastery.';
+  } else if (/work|project|deadline|team|career|job|client/.test(lower)) {
+    goalTitle = title && !title.toLowerCase().includes('untitled')
+      ? `Advance Key Deliverable: ${title}`
+      : 'Bring Clarity & Structured Focus to Professional Priorities';
+    domainReason = 'Your reflection indicates an active desire to make tangible headway on work deliverables.';
+  } else if (/relationship|boundary|friend|partner|family|talk/.test(lower)) {
+    goalTitle = 'Communicate Healthy Boundaries & Intentional Presence';
+    domainReason = 'Your writing reflects on interpersonal dynamics, clear boundaries, and relational clarity.';
+  } else {
+    goalTitle = title && !title.toLowerCase().includes('untitled')
+      ? `Action Plan: ${title}`
+      : 'Translate Reflective Insight into Concrete Weekly Progress';
+    domainReason = 'Your reflection expresses a clear desire to move from contemplation into structured execution.';
+  }
+
+  // 3-4 Specific, achievable micro-tasks
+  const tasks: string[] = [
+    'Define clear "done" criteria for the single highest-priority milestone (15 min)',
+    'Block 30 minutes of uninterrupted focus in your calendar this week',
+    'Execute the initial low-friction micro-step to establish momentum',
+    'Conduct a brief 5-minute retrospective on what worked and what felt blocked',
+  ];
+
+  const howToAchieve: string[] = [
+    'Step 1: Clarify the core objective and what success looks like.',
+    'Step 2: Schedule designated focus windows without competing distractions.',
+    'Step 3: Complete the first concrete micro-step to establish momentum.',
+    'Step 4: Review progress and adjust your pace as needed.',
+  ];
+
+  return {
+    hasGoal: true,
+    title: goalTitle,
+    description: `A focused, low-friction action plan derived from your reflection to turn insight into measurable momentum.`,
+    reason: domainReason,
+    priority,
+    howToAchieve,
+    tasks,
+  };
+}
+
+/**
+ * Local Adaptive Thought Explorer
+ * Generates tailored reflection questions based on short user input.
+ */
+export function generateLocalThoughtExplorer(thought: string): {
+  suggestedTitle: string;
+  thoughtSummary: string;
+  questions: string[];
+} {
+  const clean = (thought || '').trim();
+  const lower = clean.toLowerCase();
+
+  let title = 'Mindful Reflection';
+  const questions: string[] = [];
+
+  if (/stress|overwhelm|tired|exhaust|burnout|too much/.test(lower)) {
+    title = 'Navigating Overwhelm & Fatigue';
+    questions.push('What specific events or demands contributed most to this feeling today?');
+    questions.push('How did your body and mind signal that you were reaching capacity?');
+    questions.push('What is one commitment or task that can safely be postponed or dropped?');
+    questions.push('What would rest or decompression look like for you in the next hour?');
+    questions.push('What boundary could protect your energy tomorrow?');
+  } else if (/work|job|boss|meeting|deadline|project|client/.test(lower)) {
+    title = 'Workplace Dynamics & Priorities';
+    questions.push('What was the central moment or interaction that stood out during your workday?');
+    questions.push('What expectations (your own or others\') felt heaviest today?');
+    questions.push('What went better than expected, even in a small way?');
+    questions.push('What do you want to handle differently when you step back into work tomorrow?');
+    questions.push('What is one high-leverage priority you can focus on first?');
+  } else if (/learn|study|cloud|skill|book|read|practic/.test(lower)) {
+    title = 'Learning Momentum & Growth';
+    questions.push('What specific topic or skill captured your curiosity or hesitation?');
+    questions.push('What obstacle (e.g. time, clarity, passive watching) interrupted your flow?');
+    questions.push('How could you apply one small concept hands-on rather than just reviewing theory?');
+    questions.push('What is a realistic 20-minute practice session you could schedule this week?');
+  } else if (/anxious|worry|fear|nervous|doubt/.test(lower)) {
+    title = 'Unpacking Worry & Building Groundedness';
+    questions.push('What is the underlying story or assumption your anxiety is telling you?');
+    questions.push('What aspects of this situation are genuinely within your direct control?');
+    questions.push('What evidence from your past reminds you of your resilience in similar moments?');
+    questions.push('What would you say to a close friend facing this exact feeling?');
+    questions.push('What is one grounding breath or small physical step you can take right now?');
+  } else {
+    title = clean.length > 5 && clean.length < 50 ? clean : 'Exploring Daily Insights';
+    questions.push('What happened right before you felt moved to write this down?');
+    questions.push('How did this experience impact your mood and focus?');
+    questions.push('What pattern or lesson might be showing up here?');
+    questions.push('What would a constructive next step look like for you?');
+    questions.push('What is one kind thought you can offer yourself regarding this situation?');
+  }
+
+  return {
+    suggestedTitle: title,
+    thoughtSummary: clean || 'Initial reflection thought',
+    questions,
+  };
+}
+
+/**
+ * Local Grounded Reflection Drafter
+ * Preserves user voice without inventing facts, people, or events.
+ */
+export function generateLocalReflectionDraft(
+  thought: string,
+  notes?: string
+): {
+  suggestedTitle: string;
+  draftContent: string;
+  wordCount: number;
+  detectedThemes: string[];
+} {
+  const cleanThought = (thought || '').trim();
+  const cleanNotes = (notes || '').trim();
+
+  let title = 'Reflections on the Day';
+  if (cleanThought.length > 3 && cleanThought.length < 40) {
+    title = cleanThought;
+  } else if (/stress|overwhelm/.test(cleanThought.toLowerCase())) {
+    title = 'Processing Stress and Finding Balance';
+  } else if (/work|project/.test(cleanThought.toLowerCase())) {
+    title = 'Workplace Priorities and Clarity';
+  }
+
+  let draft = '';
+  if (cleanThought && cleanNotes) {
+    draft = `Today I took time to reflect on what has been on my mind: "${cleanThought}".\n\nLooking closer at this experience, several details stand out:\n${cleanNotes}\n\nAcknowledging these thoughts helps me understand the situation with greater clarity and choose how I want to respond moving forward.`;
+  } else if (cleanThought) {
+    draft = `Today I felt moved to capture a thought that has been staying with me: "${cleanThought}".\n\nWriting this down gives me space to step back from the immediacy of the feeling. I want to pay attention to what this is teaching me and give myself permission to navigate it one step at a time.`;
+  } else {
+    draft = `I set aside a few minutes to pause and reflect today. Taking this moment helps me reground my focus and identify what matters most right now.`;
+  }
+
+  const words = draft.split(/\s+/).filter(Boolean).length;
+  return {
+    suggestedTitle: title,
+    draftContent: draft,
+    wordCount: words,
+    detectedThemes: ['Personal Awareness', 'Mindful Reflection'],
+  };
+}
+
+/**
+ * Local Task Regeneration
+ */
+export function generateLocalTaskRegeneration(
+  goalTitle: string,
+  _goalDesc?: string
+): {
+  howToAchieve: string[];
+  tasks: string[];
+} {
+  return {
+    howToAchieve: [
+      `Step 1: Break "${goalTitle}" into three specific milestones.`,
+      'Step 2: Reserve a distraction-free 25-minute block on your calendar.',
+      'Step 3: Execute the foundational task with focused attention.',
+      'Step 4: Note down what was accomplished and plan the next phase.',
+    ],
+    tasks: [
+      `Define clear success criteria for "${goalTitle}" (15 min)`,
+      'Schedule a dedicated execution session in your planner or calendar',
+      'Complete the first tangible action item to build forward momentum',
+      'Perform a 5-minute retrospective to log progress and overcome blockers',
+    ],
+  };
+}
+
+/**
  * Generates structured multi-dimensional reflection output with separation of:
  * - Explicit statements
  * - Inferred patterns
@@ -246,36 +462,7 @@ export function generateLocalStructuredReflection(content: string, title?: strin
   ];
 
   // Check if actionable goal exists in reflection
-  const hasGoalIntent = /goal|plan|need to|want to|start|build|finish|create|implement|learn|schedule|routine|commit/i.test(lower);
-
-  let goalSuggestion = {
-    hasGoal: false,
-    title: '',
-    description: '',
-    reason: '',
-    priority: 'medium',
-    tasks: [] as string[],
-  };
-
-  if (hasGoalIntent && sentences.length > 0) {
-    // Generate one clean actionable goal
-    const goalTitle = title && !title.toLowerCase().includes('untitled') 
-      ? `Advance: ${title}`
-      : `Establish a consistent rhythm for ${themes[0] || 'Personal Priorities'}`;
-
-    goalSuggestion = {
-      hasGoal: true,
-      title: goalTitle,
-      description: `Targeted outcome derived from your reflection to turn insight into measurable momentum.`,
-      reason: `Your reflection emphasizes ${themes[0] || 'this area'} as a critical priority.`,
-      priority: 'medium',
-      tasks: [
-        `Define clear completion criteria for the next phase (15 min)`,
-        `Block 30 minutes of uninterrupted focus this week`,
-        `Complete the initial micro-step and review friction`,
-      ],
-    };
-  }
+  const goalSuggestion = generateLocalGoalSuggestion(content, title);
 
   return {
     summary: sentences[0] || 'A thoughtful personal reflection exploring thoughts, challenges, and aspirations.',

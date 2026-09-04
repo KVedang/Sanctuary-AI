@@ -15,7 +15,7 @@ import {
   ShieldCheck,
   Check
 } from 'lucide-react';
-import { Goal, GoalTask } from '../../types';
+import { Goal, GoalTask, JournalEntry, GoalSuggestion } from '../../types';
 import { db } from '../../lib/firebase';
 import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
@@ -24,10 +24,17 @@ import { sanitizePayload, formatDate } from '../../lib/utils';
 
 interface GoalListProps {
   goals: Goal[];
+  entries?: JournalEntry[];
   onRefresh: () => void;
+  onNavigateToEditor?: () => void;
 }
 
-export const GoalList: React.FC<GoalListProps> = ({ goals, onRefresh }) => {
+export const GoalList: React.FC<GoalListProps> = ({ 
+  goals, 
+  entries = [], 
+  onRefresh,
+  onNavigateToEditor 
+}) => {
   const { user } = useAuth();
   const { authenticatedFetch } = useApi();
   const [showModal, setShowModal] = useState(false);
@@ -45,6 +52,24 @@ export const GoalList: React.FC<GoalListProps> = ({ goals, onRefresh }) => {
   const [loadingCoaching, setLoadingCoaching] = useState(false);
   const [coachingError, setCoachingError] = useState<string | null>(null);
   const [addedSubtasks, setAddedSubtasks] = useState<Set<string>>(new Set());
+
+  // AI Suggested Goal State (From Reflection)
+  const [showAiSuggestModal, setShowAiSuggestModal] = useState(false);
+  const [selectedJournalId, setSelectedJournalId] = useState<string>('');
+  const [isAnalyzingJournal, setIsAnalyzingJournal] = useState(false);
+  const [suggestedGoalResult, setSuggestedGoalResult] = useState<GoalSuggestion | null>(null);
+  const [aiSuggestError, setAiSuggestError] = useState<string | null>(null);
+  const [isEditingSuggestedGoal, setIsEditingSuggestedGoal] = useState(false);
+  const [editSugTitle, setEditSugTitle] = useState('');
+  const [editSugDescription, setEditSugDescription] = useState('');
+  const [editSugPriority, setEditSugPriority] = useState<'low' | 'medium' | 'high'>('medium');
+  const [editSugHowToAchieve, setEditSugHowToAchieve] = useState<string[]>([]);
+  const [newSugStepInput, setNewSugStepInput] = useState('');
+  const [editSugTasks, setEditSugTasks] = useState<string[]>([]);
+  const [newSugTaskInput, setNewSugTaskInput] = useState('');
+  const [savingSuggestedGoal, setSavingSuggestedGoal] = useState(false);
+  const [isRegeneratingSugTasks, setIsRegeneratingSugTasks] = useState(false);
+  const [suggestSuccessFeedback, setSuggestSuccessFeedback] = useState<string | null>(null);
 
   const handleAddTask = () => {
     if (!taskInput.trim()) return;
@@ -205,6 +230,193 @@ export const GoalList: React.FC<GoalListProps> = ({ goals, onRefresh }) => {
     }
   };
 
+  // 1. Open AI Goal Suggestion Modal
+  const handleOpenAiSuggestModal = () => {
+    setSuggestedGoalResult(null);
+    setAiSuggestError(null);
+    setSuggestSuccessFeedback(null);
+    setIsEditingSuggestedGoal(false);
+    if (!selectedJournalId && entries.length > 0) {
+      setSelectedJournalId(entries[0].id);
+    }
+    setShowAiSuggestModal(true);
+  };
+
+  // 2. Run AI Goal Extraction on selected reflection
+  const handleRunAiGoalExtraction = async () => {
+    const entry = entries.find((e) => e.id === selectedJournalId) || entries[0];
+    if (!entry || !entry.content?.trim()) {
+      setAiSuggestError('Please select a reflection with written content.');
+      return;
+    }
+
+    setIsAnalyzingJournal(true);
+    setAiSuggestError(null);
+    setSuggestSuccessFeedback(null);
+    setSuggestedGoalResult(null);
+
+    try {
+      const data = await authenticatedFetch('/api/ai/suggest-goal', {
+        method: 'POST',
+        body: JSON.stringify({
+          content: entry.content,
+          title: entry.title,
+        }),
+      });
+
+      if (data.goalSuggestion) {
+        setSuggestedGoalResult(data.goalSuggestion);
+        setEditSugTitle(data.goalSuggestion.title || '');
+        setEditSugDescription(data.goalSuggestion.description || data.goalSuggestion.reason || '');
+        setEditSugPriority(data.goalSuggestion.priority || 'medium');
+        setEditSugHowToAchieve(data.goalSuggestion.howToAchieve ? [...data.goalSuggestion.howToAchieve] : []);
+        setEditSugTasks(data.goalSuggestion.tasks ? [...data.goalSuggestion.tasks] : []);
+      } else {
+        setAiSuggestError('Could not formulate a goal suggestion from this reflection.');
+      }
+    } catch (err: any) {
+      console.warn('AI goal extraction error:', err);
+      setAiSuggestError('Could not generate goal suggestion at this time. You can still create goals manually.');
+    } finally {
+      setIsAnalyzingJournal(false);
+    }
+  };
+
+  // 2b. Regenerate Tasks for Suggested Goal
+  const handleRegenerateSugTasks = async () => {
+    if (!suggestedGoalResult || isRegeneratingSugTasks) return;
+
+    setIsRegeneratingSugTasks(true);
+    try {
+      const entry = entries.find((e) => e.id === selectedJournalId);
+      const res = await authenticatedFetch('/api/ai/regenerate-tasks', {
+        method: 'POST',
+        body: JSON.stringify({
+          goalTitle: suggestedGoalResult.title,
+          goalDescription: suggestedGoalResult.description || suggestedGoalResult.reason,
+          reflectionContext: entry?.content,
+        }),
+      });
+
+      if (res.tasks && Array.isArray(res.tasks)) {
+        setSuggestedGoalResult({
+          ...suggestedGoalResult,
+          tasks: res.tasks,
+          howToAchieve: res.howToAchieve || suggestedGoalResult.howToAchieve,
+        });
+        setEditSugTasks(res.tasks);
+        if (res.howToAchieve) {
+          setEditSugHowToAchieve(res.howToAchieve);
+        }
+      }
+    } catch (err: any) {
+      console.error('Error regenerating suggested tasks:', err);
+    } finally {
+      setIsRegeneratingSugTasks(false);
+    }
+  };
+
+  // 3. Accept AI Suggested Goal directly
+  const handleAcceptSuggestedGoal = async () => {
+    if (!user || !suggestedGoalResult || !suggestedGoalResult.hasGoal || savingSuggestedGoal) return;
+
+    setSavingSuggestedGoal(true);
+    setAiSuggestError(null);
+
+    try {
+      const goalId = `goal_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const nowIso = new Date().toISOString();
+      const tasksFormatted: GoalTask[] = (suggestedGoalResult.tasks || []).map((t, idx) => ({
+        id: `task_${Date.now()}_${idx}`,
+        title: t,
+        completed: false,
+      }));
+
+      const newGoal: Goal = {
+        id: goalId,
+        userId: user.uid,
+        title: suggestedGoalResult.title || 'Personal Milestone',
+        description: suggestedGoalResult.description || suggestedGoalResult.reason || '',
+        priority: suggestedGoalResult.priority || 'medium',
+        status: 'in_progress',
+        progress: 0,
+        howToAchieve: suggestedGoalResult.howToAchieve || [],
+        tasks: tasksFormatted,
+        extractedFromJournalId: selectedJournalId || '',
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+
+      const goalRef = doc(db, 'users', user.uid, 'goals', goalId);
+      await setDoc(goalRef, sanitizePayload(newGoal));
+
+      setSuggestSuccessFeedback('Goal and tasks saved to your Goals! 🎉');
+      onRefresh();
+
+      setTimeout(() => {
+        setShowAiSuggestModal(false);
+        setSuggestSuccessFeedback(null);
+        setSuggestedGoalResult(null);
+      }, 1400);
+    } catch (err: any) {
+      console.error('Error saving suggested goal:', err);
+      setAiSuggestError('Failed to save goal to Firestore. Please try again.');
+    } finally {
+      setSavingSuggestedGoal(false);
+    }
+  };
+
+  // 4. Save Custom / Edited Suggested Goal
+  const handleSaveCustomSuggestedGoal = async () => {
+    if (!user || !editSugTitle.trim() || savingSuggestedGoal) return;
+
+    setSavingSuggestedGoal(true);
+    setAiSuggestError(null);
+
+    try {
+      const goalId = `goal_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const nowIso = new Date().toISOString();
+      const tasksFormatted: GoalTask[] = editSugTasks.map((t, idx) => ({
+        id: `task_${Date.now()}_${idx}`,
+        title: t,
+        completed: false,
+      }));
+
+      const customGoal: Goal = {
+        id: goalId,
+        userId: user.uid,
+        title: editSugTitle.trim(),
+        description: editSugDescription.trim(),
+        priority: editSugPriority,
+        status: 'in_progress',
+        progress: 0,
+        howToAchieve: editSugHowToAchieve || [],
+        tasks: tasksFormatted,
+        extractedFromJournalId: selectedJournalId || '',
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+
+      const goalRef = doc(db, 'users', user.uid, 'goals', goalId);
+      await setDoc(goalRef, sanitizePayload(customGoal));
+
+      setSuggestSuccessFeedback('Customized goal and tasks saved! 🎉');
+      onRefresh();
+
+      setTimeout(() => {
+        setShowAiSuggestModal(false);
+        setIsEditingSuggestedGoal(false);
+        setSuggestSuccessFeedback(null);
+        setSuggestedGoalResult(null);
+      }, 1400);
+    } catch (err: any) {
+      console.error('Error saving custom goal:', err);
+      setAiSuggestError('Failed to save custom goal. Please try again.');
+    } finally {
+      setSavingSuggestedGoal(false);
+    }
+  };
+
   return (
     <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
       {/* Header */}
@@ -218,30 +430,52 @@ export const GoalList: React.FC<GoalListProps> = ({ goals, onRefresh }) => {
           </p>
         </div>
 
-        <button
-          id="create-goal-modal-btn"
-          onClick={() => setShowModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-stone-900 text-stone-50 hover:bg-stone-800 rounded-xl text-xs font-medium transition cursor-pointer shadow-xs self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4 text-amber-300" />
-          <span>New Goal</span>
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            id="ai-suggest-goal-from-journal-btn"
+            onClick={handleOpenAiSuggestModal}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300/80 rounded-xl text-xs font-medium transition cursor-pointer shadow-2xs"
+            title="Analyze reflections to suggest an actionable goal with micro-tasks"
+          >
+            <Sparkles className="w-4 h-4 text-amber-600" />
+            <span>AI Suggest from Journal</span>
+          </button>
+
+          <button
+            id="create-goal-modal-btn"
+            onClick={() => setShowModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-stone-900 text-stone-50 hover:bg-stone-800 rounded-xl text-xs font-medium transition cursor-pointer shadow-xs"
+          >
+            <Plus className="w-4 h-4 text-amber-300" />
+            <span>New Goal</span>
+          </button>
+        </div>
       </div>
 
       {/* Goal Cards Grid */}
       {goals.length === 0 ? (
-        <div className="bg-white p-12 rounded-2xl border border-stone-200 text-center">
-          <Target className="w-10 h-10 text-stone-300 mx-auto mb-3" />
+        <div className="bg-white p-12 rounded-2xl border border-stone-200 text-center space-y-3">
+          <Target className="w-10 h-10 text-stone-300 mx-auto" />
           <p className="text-sm font-medium text-stone-700">No active goals yet</p>
-          <p className="text-xs text-stone-400 mt-1 max-w-sm mx-auto">
-            You can add goals manually or ask Gemini in the Journal Editor to "Extract Goals" from your reflections.
+          <p className="text-xs text-stone-400 max-w-sm mx-auto">
+            You can add goals manually or have Sanctuary AI analyze your journal reflections to suggest actionable goals and concrete micro-tasks.
           </p>
-          <button
-            onClick={() => setShowModal(true)}
-            className="mt-4 px-4 py-2 rounded-xl bg-stone-900 text-stone-50 text-xs font-medium hover:bg-stone-800 transition cursor-pointer"
-          >
-            Create Your First Goal
-          </button>
+          <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
+            <button
+              id="empty-state-ai-suggest-btn"
+              onClick={handleOpenAiSuggestModal}
+              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium transition cursor-pointer flex items-center gap-1.5 shadow-2xs"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>AI Suggest from Reflection</span>
+            </button>
+            <button
+              onClick={() => setShowModal(true)}
+              className="px-4 py-2 rounded-xl bg-stone-900 text-stone-50 text-xs font-medium hover:bg-stone-800 transition cursor-pointer"
+            >
+              Create Manually
+            </button>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -345,6 +579,42 @@ export const GoalList: React.FC<GoalListProps> = ({ goals, onRefresh }) => {
                     </div>
                   </div>
                 )}
+
+                {/* Plan Roadmap (How to achieve) */}
+                {goal.howToAchieve && goal.howToAchieve.length > 0 && (
+                  <div className="space-y-1 pt-2 border-t border-stone-100">
+                    <p className="text-[11px] font-semibold text-stone-400 uppercase tracking-wider">
+                      Plan Roadmap:
+                    </p>
+                    <div className="space-y-1">
+                      {goal.howToAchieve.map((step, idx) => (
+                        <div key={idx} className="flex items-start gap-1.5 text-xs text-stone-600 bg-stone-50/70 p-1.5 rounded-lg">
+                          <span className="text-amber-600 font-bold shrink-0">{idx + 1}.</span>
+                          <span className="leading-tight">{step}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Next Step Highlight */}
+                {(() => {
+                  const nextTask = goal.tasks?.find((t) => !t.completed);
+                  return nextTask ? (
+                    <div className="text-xs bg-amber-50/80 border border-amber-200/70 rounded-xl p-2.5 flex items-center justify-between gap-2 mt-2">
+                      <div className="truncate">
+                        <span className="font-semibold text-amber-900 block text-[10px] uppercase tracking-wider">Next Step:</span>
+                        <span className="text-stone-800 text-xs truncate block">{nextTask.title}</span>
+                      </div>
+                      <button
+                        onClick={() => handleToggleTask(goal, nextTask.id)}
+                        className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-semibold shrink-0 cursor-pointer shadow-2xs"
+                      >
+                        Complete
+                      </button>
+                    </div>
+                  ) : null;
+                })()}
               </div>
 
               <div className="flex items-center justify-between text-[11px] text-stone-400 font-mono pt-3 border-t border-stone-100">
@@ -657,6 +927,459 @@ export const GoalList: React.FC<GoalListProps> = ({ goals, onRefresh }) => {
                 Delete Goal
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI Suggested Goal Modal (From Journal Reflection) */}
+      {showAiSuggestModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-950/40 backdrop-blur-xs">
+          <div className="w-full max-w-xl bg-white rounded-2xl p-6 shadow-xl border border-stone-200 max-h-[90vh] overflow-y-auto space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-serif font-semibold text-stone-900 text-base">
+                    AI Goal Suggestion from Journal
+                  </h3>
+                  <p className="text-[11px] text-stone-500">
+                    Extracts actionable intentions and formulates one milestone with concrete micro-tasks.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAiSuggestModal(false)}
+                className="text-stone-400 hover:text-stone-600 p-1.5 rounded-lg transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Check if user has reflections */}
+            {entries.length === 0 ? (
+              <div className="py-8 text-center space-y-3">
+                <p className="text-sm font-medium text-stone-700">
+                  No journal reflections found yet
+                </p>
+                <p className="text-xs text-stone-500 max-w-sm mx-auto">
+                  Write a reflection in the Journal tab first so Gemini can analyze your thoughts, identify intentions, and formulate an actionable goal.
+                </p>
+                {onNavigateToEditor && (
+                  <button
+                    onClick={() => {
+                      setShowAiSuggestModal(false);
+                      onNavigateToEditor();
+                    }}
+                    className="mt-2 px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-medium transition cursor-pointer"
+                  >
+                    Write a Reflection
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Reflection Selector */}
+                <div>
+                  <label className="block text-xs font-semibold text-stone-600 uppercase mb-1.5">
+                    Select Reflection to Analyze
+                  </label>
+                  <select
+                    value={selectedJournalId}
+                    onChange={(e) => {
+                      setSelectedJournalId(e.target.value);
+                      setSuggestedGoalResult(null);
+                      setAiSuggestError(null);
+                      setSuggestSuccessFeedback(null);
+                    }}
+                    className="w-full px-3.5 py-2 text-xs rounded-xl border border-stone-200 bg-stone-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-400/50"
+                  >
+                    {entries.map((entry) => (
+                      <option key={entry.id} value={entry.id}>
+                        {entry.title || 'Untitled Reflection'} ({formatDate(entry.createdAt)})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Selected Reflection Preview Snippet */}
+                {(() => {
+                  const entry = entries.find((e) => e.id === selectedJournalId) || entries[0];
+                  if (!entry) return null;
+                  return (
+                    <div className="p-3 bg-stone-50 rounded-xl border border-stone-200/80 text-xs text-stone-600 max-h-24 overflow-y-auto leading-relaxed italic">
+                      "{entry.content.length > 220 ? entry.content.substring(0, 220) + '...' : entry.content}"
+                    </div>
+                  );
+                })()}
+
+                {/* Action trigger button (if no suggestion yet or to re-run) */}
+                {!suggestedGoalResult && !isAnalyzingJournal && (
+                  <button
+                    id="run-ai-goal-extraction-btn"
+                    onClick={handleRunAiGoalExtraction}
+                    disabled={isAnalyzingJournal}
+                    className="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-2 shadow-2xs"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>Analyze Reflection &amp; Formulate Goal</span>
+                  </button>
+                )}
+
+                {/* Loading state */}
+                {isAnalyzingJournal && (
+                  <div className="py-8 flex flex-col items-center justify-center gap-2.5 text-stone-500">
+                    <Loader2 className="w-6 h-6 animate-spin text-amber-500" />
+                    <p className="text-xs font-medium">
+                      Gemini is analyzing your reflection for actionable commitments...
+                    </p>
+                  </div>
+                )}
+
+                {/* Error Banner */}
+                {aiSuggestError && (
+                  <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                    <span>{aiSuggestError}</span>
+                  </div>
+                )}
+
+                {/* Success Banner */}
+                {suggestSuccessFeedback && (
+                  <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                    <span>{suggestSuccessFeedback}</span>
+                  </div>
+                )}
+
+                {/* Suggested Goal Card (when hasGoal === true and not editing) */}
+                {suggestedGoalResult && suggestedGoalResult.hasGoal && !isEditingSuggestedGoal && (
+                  <div className="p-4 rounded-xl bg-amber-50/60 border border-amber-200 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <span
+                          className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full ${
+                            suggestedGoalResult.priority === 'high'
+                              ? 'bg-rose-100 text-rose-800'
+                              : suggestedGoalResult.priority === 'low'
+                              ? 'bg-stone-100 text-stone-600'
+                              : 'bg-amber-100 text-amber-800'
+                          }`}
+                        >
+                          {suggestedGoalResult.priority || 'medium'} priority
+                        </span>
+                        <h4 className="font-serif font-bold text-stone-900 text-base mt-1">
+                          {suggestedGoalResult.title}
+                        </h4>
+                      </div>
+                    </div>
+
+                    {suggestedGoalResult.description && (
+                      <p className="text-xs text-stone-700 leading-relaxed">
+                        {suggestedGoalResult.description}
+                      </p>
+                    )}
+
+                    {suggestedGoalResult.reason && (
+                      <div className="p-2.5 rounded-lg bg-amber-100/50 border border-amber-200/60 text-xs text-amber-900">
+                        <span className="font-bold">Why this goal? </span>
+                        <span>{suggestedGoalResult.reason}</span>
+                      </div>
+                    )}
+
+                    {/* How to Achieve It Steps */}
+                    {suggestedGoalResult.howToAchieve && suggestedGoalResult.howToAchieve.length > 0 && (
+                      <div className="space-y-1.5 pt-1">
+                        <span className="text-xs font-semibold text-stone-700 block">
+                          How to achieve it (Roadmap):
+                        </span>
+                        <div className="space-y-1">
+                          {suggestedGoalResult.howToAchieve.map((stepText, idx) => (
+                            <div
+                              key={idx}
+                              className="flex items-start gap-2 text-xs text-stone-800 bg-white/95 p-2 rounded-lg border border-amber-100"
+                            >
+                              <span className="text-amber-600 font-bold shrink-0">{idx + 1}.</span>
+                              <span className="font-sans leading-snug">{stepText}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Tasks Checklist */}
+                    {suggestedGoalResult.tasks && suggestedGoalResult.tasks.length > 0 && (
+                      <div className="space-y-1.5 pt-1">
+                        <span className="text-xs font-semibold text-stone-700 block">
+                          Suggested Micro-Tasks ({suggestedGoalResult.tasks.length}):
+                        </span>
+                        <div className="space-y-1">
+                          {suggestedGoalResult.tasks.map((taskText, idx) => (
+                            <div
+                              key={idx}
+                              className="flex items-start gap-2 text-xs text-stone-800 bg-white/95 p-2 rounded-lg border border-amber-100"
+                            >
+                              <span className="text-stone-400 font-mono">☐</span>
+                              <span className="font-sans leading-snug">{taskText}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Decision Action Buttons */}
+                    <div className="pt-2 flex flex-wrap items-center gap-2.5 border-t border-amber-200/50">
+                      <button
+                        id="modal-accept-suggested-goal-btn"
+                        onClick={handleAcceptSuggestedGoal}
+                        disabled={savingSuggestedGoal}
+                        className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 shadow-2xs disabled:opacity-50"
+                      >
+                        {savingSuggestedGoal ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Check className="w-3.5 h-3.5" />
+                        )}
+                        <span>Accept Goal</span>
+                      </button>
+
+                      <button
+                        id="modal-edit-suggested-goal-btn"
+                        onClick={() => setIsEditingSuggestedGoal(true)}
+                        disabled={savingSuggestedGoal}
+                        className="px-4 py-2 rounded-xl bg-white hover:bg-stone-50 text-stone-800 text-xs font-semibold border border-stone-300 transition cursor-pointer shadow-2xs"
+                      >
+                        Edit Goal First
+                      </button>
+
+                      <button
+                        id="modal-regenerate-suggested-tasks-btn"
+                        onClick={handleRegenerateSugTasks}
+                        disabled={isRegeneratingSugTasks || savingSuggestedGoal}
+                        className="px-3.5 py-2 rounded-xl bg-white hover:bg-stone-50 text-stone-700 text-xs font-medium border border-stone-200 transition cursor-pointer shadow-2xs flex items-center gap-1.5"
+                      >
+                        {isRegeneratingSugTasks ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-stone-500" />
+                        ) : (
+                          <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                        )}
+                        <span>{isRegeneratingSugTasks ? 'Regenerating...' : 'Regenerate Tasks'}</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setSuggestedGoalResult(null);
+                        }}
+                        className="px-3 py-2 rounded-xl text-stone-500 hover:text-stone-800 text-xs font-medium transition cursor-pointer"
+                      >
+                        Try Another Reflection
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Edit Suggested Goal Form */}
+                {suggestedGoalResult && isEditingSuggestedGoal && (
+                  <div className="p-4 rounded-xl bg-stone-50 border border-stone-200 space-y-3">
+                    <h4 className="font-serif font-semibold text-stone-900 text-sm">
+                      Customize Goal Before Saving
+                    </h4>
+
+                    <div className="space-y-2">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-stone-600 uppercase mb-1">
+                          Goal Title
+                        </label>
+                        <input
+                          type="text"
+                          value={editSugTitle}
+                          onChange={(e) => setEditSugTitle(e.target.value)}
+                          className="w-full px-3 py-1.5 text-xs rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-400/50 bg-white"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-stone-600 uppercase mb-1">
+                          Description
+                        </label>
+                        <textarea
+                          rows={2}
+                          value={editSugDescription}
+                          onChange={(e) => setEditSugDescription(e.target.value)}
+                          className="w-full px-3 py-1.5 text-xs rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-400/50 bg-white"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-stone-600 uppercase mb-1">
+                          Priority
+                        </label>
+                        <select
+                          value={editSugPriority}
+                          onChange={(e) => setEditSugPriority(e.target.value as any)}
+                          className="w-full px-3 py-1.5 text-xs rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-400/50 bg-white"
+                        >
+                          <option value="low">Low Priority</option>
+                          <option value="medium">Medium Priority</option>
+                          <option value="high">High Priority</option>
+                        </select>
+                      </div>
+
+                      {/* How to achieve steps builder */}
+                      <div className="space-y-1.5 pt-1">
+                        <label className="block text-[11px] font-semibold text-stone-600 uppercase">
+                          How to Achieve Steps ({editSugHowToAchieve.length})
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={newSugStepInput}
+                            onChange={(e) => setNewSugStepInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                if (newSugStepInput.trim()) {
+                                  setEditSugHowToAchieve([...editSugHowToAchieve, newSugStepInput.trim()]);
+                                  setNewSugStepInput('');
+                                }
+                              }
+                            }}
+                            placeholder="Add milestone/step (Enter)..."
+                            className="flex-1 px-3 py-1.5 text-xs rounded-xl border border-stone-200 bg-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (newSugStepInput.trim()) {
+                                setEditSugHowToAchieve([...editSugHowToAchieve, newSugStepInput.trim()]);
+                                setNewSugStepInput('');
+                              }
+                            }}
+                            className="px-3 py-1.5 bg-stone-200 hover:bg-stone-300 text-stone-800 rounded-xl text-xs font-medium cursor-pointer"
+                          >
+                            Add
+                          </button>
+                        </div>
+
+                        <div className="space-y-1 max-h-28 overflow-y-auto pt-1">
+                          {editSugHowToAchieve.map((s, idx) => (
+                            <div
+                              key={idx}
+                              className="flex items-center justify-between text-xs bg-white px-2.5 py-1.5 rounded-lg border border-stone-200"
+                            >
+                              <span className="truncate flex-1">
+                                <strong className="text-amber-700">{idx + 1}.</strong> {s}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setEditSugHowToAchieve(editSugHowToAchieve.filter((_, i) => i !== idx))
+                                }
+                                className="text-stone-400 hover:text-rose-600 font-bold ml-2 cursor-pointer"
+                              >
+                                &times;
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Micro-tasks builder */}
+                      <div className="space-y-1.5 pt-1">
+                        <label className="block text-[11px] font-semibold text-stone-600 uppercase">
+                          Micro-tasks ({editSugTasks.length})
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={newSugTaskInput}
+                            onChange={(e) => setNewSugTaskInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                if (newSugTaskInput.trim()) {
+                                  setEditSugTasks([...editSugTasks, newSugTaskInput.trim()]);
+                                  setNewSugTaskInput('');
+                                }
+                              }
+                            }}
+                            placeholder="Add micro-task..."
+                            className="flex-1 px-3 py-1.5 text-xs rounded-xl border border-stone-200 bg-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (newSugTaskInput.trim()) {
+                                setEditSugTasks([...editSugTasks, newSugTaskInput.trim()]);
+                                setNewSugTaskInput('');
+                              }
+                            }}
+                            className="px-3 py-1.5 bg-stone-200 hover:bg-stone-300 text-stone-800 rounded-xl text-xs font-medium"
+                          >
+                            Add
+                          </button>
+                        </div>
+
+                        <div className="space-y-1 max-h-32 overflow-y-auto pt-1">
+                          {editSugTasks.map((t, idx) => (
+                            <div
+                              key={idx}
+                              className="flex items-center justify-between text-xs bg-white px-2.5 py-1.5 rounded-lg border border-stone-200"
+                            >
+                              <span>{t}</span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setEditSugTasks(editSugTasks.filter((_, i) => i !== idx))
+                                }
+                                className="text-stone-400 hover:text-rose-600 font-bold ml-2"
+                              >
+                                &times;
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-stone-200">
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingSuggestedGoal(false)}
+                        className="px-3.5 py-1.5 rounded-xl text-xs font-medium text-stone-600 hover:text-stone-800 bg-white border border-stone-200"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSaveCustomSuggestedGoal}
+                        disabled={savingSuggestedGoal || !editSugTitle.trim()}
+                        className="px-4 py-1.5 rounded-xl text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white transition disabled:opacity-50"
+                      >
+                        {savingSuggestedGoal ? 'Saving...' : 'Save Goal to Tracker'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* No Goal detected */}
+                {suggestedGoalResult && !suggestedGoalResult.hasGoal && (
+                  <div className="p-4 rounded-xl bg-stone-50 border border-stone-200 text-xs text-stone-600 space-y-2">
+                    <p className="font-medium text-stone-800">
+                      No actionable goal detected in this reflection.
+                    </p>
+                    <p className="text-stone-500">
+                      {suggestedGoalResult.reason || 'This journal entry appears to be primarily emotional expression or contemplative processing rather than concrete future commitments.'}
+                    </p>
+                    <p className="text-stone-400 pt-1">
+                      You can select a different reflection or create a goal manually using the "+ New Goal" button.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

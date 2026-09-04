@@ -54,6 +54,7 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
   const [activeSuggestion, setActiveSuggestion] = useState<GoalSuggestion | null>(null);
   const [goalAccepted, setGoalAccepted] = useState(false);
   const [savingGoal, setSavingGoal] = useState(false);
+  const [isRegeneratingTasks, setIsRegeneratingTasks] = useState(false);
   const [goalFeedback, setGoalFeedback] = useState<string | null>(null);
 
   // Edit Goal Modal State
@@ -61,6 +62,8 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editPriority, setEditPriority] = useState<'low' | 'medium' | 'high'>('medium');
+  const [editHowToAchieve, setEditHowToAchieve] = useState<string[]>([]);
+  const [newStepInput, setNewStepInput] = useState('');
   const [editTasks, setEditTasks] = useState<string[]>([]);
   const [newTaskInput, setNewTaskInput] = useState('');
 
@@ -111,7 +114,13 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
         
         if (data.structuredData.goalSuggestion) {
           setActiveSuggestion(data.structuredData.goalSuggestion);
+        } else if (data.structuredData.hasGoal !== undefined) {
+          setActiveSuggestion(data.structuredData);
+        } else if (data.goalSuggestion) {
+          setActiveSuggestion(data.goalSuggestion);
         }
+      } else if (data.goalSuggestion) {
+        setActiveSuggestion(data.goalSuggestion);
       } else if (data.result) {
         setAiResult(data.result);
         if (mode === 'summarize' && onApplySummary) {
@@ -145,12 +154,14 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
       }));
 
       const newGoal = {
+        id: goalRef.id,
         userId: user.uid,
         title: activeSuggestion.title || 'Personal Milestone',
         description: activeSuggestion.description || activeSuggestion.reason || '',
         priority: activeSuggestion.priority || 'medium',
         status: 'in_progress',
         progress: 0,
+        howToAchieve: activeSuggestion.howToAchieve || [],
         tasks: tasksFormatted,
         extractedFromJournalId: journalId || '',
         createdAt: new Date().toISOString(),
@@ -159,12 +170,41 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
 
       await setDoc(goalRef, sanitizePayload(newGoal));
       setGoalAccepted(true);
-      setGoalFeedback('Goal and tasks saved to your Goals tab! 🎉');
+      setGoalFeedback('Goal, how-to-achieve plan, and tasks saved to your Goals tab! 🎉');
     } catch (err: any) {
       console.error('Error saving goal:', err);
       setGoalFeedback('Failed to save goal to Firestore. Please try again.');
     } finally {
       setSavingGoal(false);
+    }
+  };
+
+  // 1b. Regenerate Tasks
+  const handleRegenerateTasks = async () => {
+    if (!activeSuggestion || isRegeneratingTasks) return;
+
+    setIsRegeneratingTasks(true);
+    try {
+      const res = await authenticatedFetch('/api/ai/regenerate-tasks', {
+        method: 'POST',
+        body: JSON.stringify({
+          goalTitle: activeSuggestion.title,
+          goalDescription: activeSuggestion.description || activeSuggestion.reason,
+          reflectionContext: content,
+        }),
+      });
+
+      if (res.tasks && Array.isArray(res.tasks)) {
+        setActiveSuggestion({
+          ...activeSuggestion,
+          tasks: res.tasks,
+          howToAchieve: res.howToAchieve || activeSuggestion.howToAchieve,
+        });
+      }
+    } catch (err: any) {
+      console.error('Error regenerating tasks:', err);
+    } finally {
+      setIsRegeneratingTasks(false);
     }
   };
 
@@ -174,6 +214,7 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
     setEditTitle(activeSuggestion.title || '');
     setEditDescription(activeSuggestion.description || activeSuggestion.reason || '');
     setEditPriority(activeSuggestion.priority || 'medium');
+    setEditHowToAchieve(activeSuggestion.howToAchieve ? [...activeSuggestion.howToAchieve] : []);
     setEditTasks(activeSuggestion.tasks ? [...activeSuggestion.tasks] : []);
     setIsEditingGoal(true);
   };
@@ -192,12 +233,14 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
       }));
 
       const customGoal = {
+        id: goalRef.id,
         userId: user.uid,
         title: editTitle.trim(),
         description: editDescription.trim(),
         priority: editPriority,
         status: 'in_progress',
         progress: 0,
+        howToAchieve: editHowToAchieve,
         tasks: tasksFormatted,
         extractedFromJournalId: journalId || '',
         createdAt: new Date().toISOString(),
@@ -453,8 +496,25 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
               {/* Why statement */}
               {activeSuggestion.reason && (
                 <div className="p-2.5 rounded-lg bg-amber-100/60 border border-amber-200/60 text-xs text-amber-900">
-                  <span className="font-bold">Why: </span>
+                  <span className="font-bold">Why this goal? </span>
                   <span>{activeSuggestion.reason}</span>
+                </div>
+              )}
+
+              {/* How to achieve it */}
+              {activeSuggestion.howToAchieve && activeSuggestion.howToAchieve.length > 0 && (
+                <div className="space-y-1.5 pt-1">
+                  <span className="text-xs font-semibold text-stone-700 block">
+                    How to achieve it:
+                  </span>
+                  <div className="space-y-1">
+                    {activeSuggestion.howToAchieve.map((stepText, idx) => (
+                      <div key={idx} className="flex items-start gap-2 text-xs text-stone-700 bg-white/90 p-2 rounded-lg border border-amber-100">
+                        <span className="text-amber-600 font-bold shrink-0">{idx + 1}.</span>
+                        <span className="font-sans leading-snug">{stepText}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -508,6 +568,20 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
                       className="px-4 py-2 rounded-xl bg-white hover:bg-stone-50 text-stone-800 text-xs font-semibold border border-stone-300 transition cursor-pointer shadow-2xs"
                     >
                       Edit Goal First
+                    </button>
+
+                    <button
+                      id="ai-regenerate-tasks-btn"
+                      onClick={handleRegenerateTasks}
+                      disabled={isRegeneratingTasks || savingGoal}
+                      className="px-3 py-2 rounded-xl bg-white hover:bg-stone-50 text-stone-700 text-xs font-medium border border-stone-200 transition cursor-pointer shadow-2xs flex items-center gap-1.5"
+                    >
+                      {isRegeneratingTasks ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-stone-500" />
+                      ) : (
+                        <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                      )}
+                      <span>{isRegeneratingTasks ? 'Regenerating...' : 'Regenerate Tasks'}</span>
                     </button>
 
                     <button
@@ -638,6 +712,71 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
                       {p}
                     </button>
                   ))}
+                </div>
+              </div>
+
+              {/* How to Achieve Steps List */}
+              <div className="space-y-2 pt-1">
+                <label className="text-xs font-semibold text-stone-700 block">
+                  How to Achieve It (Plan Steps):
+                </label>
+                <div className="space-y-1.5">
+                  {editHowToAchieve.map((step, idx) => (
+                    <div key={idx} className="flex items-center gap-2 bg-stone-50 p-2 rounded-lg border border-stone-200">
+                      <span className="text-amber-600 font-bold text-xs shrink-0">{idx + 1}.</span>
+                      <input
+                        type="text"
+                        value={step}
+                        onChange={(e) => {
+                          const updated = [...editHowToAchieve];
+                          updated[idx] = e.target.value;
+                          setEditHowToAchieve(updated);
+                        }}
+                        className="flex-1 text-xs bg-transparent focus:outline-none text-stone-800"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditHowToAchieve(editHowToAchieve.filter((_, i) => i !== idx));
+                        }}
+                        className="text-stone-400 hover:text-rose-600 p-1"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Add step input */}
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="text"
+                    value={newStepInput}
+                    onChange={(e) => setNewStepInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (newStepInput.trim()) {
+                          setEditHowToAchieve([...editHowToAchieve, newStepInput.trim()]);
+                          setNewStepInput('');
+                        }
+                      }
+                    }}
+                    placeholder="Add step (e.g. Step 1: Dedicate 30 mins) (Enter)..."
+                    className="flex-1 text-xs px-3 py-2 rounded-xl border border-stone-300 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (newStepInput.trim()) {
+                        setEditHowToAchieve([...editHowToAchieve, newStepInput.trim()]);
+                        setNewStepInput('');
+                      }
+                    }}
+                    className="px-3 py-2 rounded-xl bg-stone-200 hover:bg-stone-300 text-stone-700 text-xs font-medium cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
 

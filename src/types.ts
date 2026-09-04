@@ -88,6 +88,7 @@ export interface Goal {
   status: 'not_started' | 'in_progress' | 'completed' | 'abandoned';
   progress: number; // 0 to 100
   targetDate?: string;
+  howToAchieve?: string[];
   tasks: GoalTask[];
   extractedFromJournalId?: string;
   createdAt: string;
@@ -114,6 +115,7 @@ export interface GoalSuggestion {
   description?: string;
   reason?: string;
   priority?: 'low' | 'medium' | 'high';
+  howToAchieve?: string[];
   tasks?: string[];
 }
 

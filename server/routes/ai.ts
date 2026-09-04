@@ -8,20 +8,28 @@ import {
 import { 
   getPromptForMode, 
   SYSTEM_BASE_SECURITY,
+  SYSTEM_GOAL_EXTRACTION,
   SYSTEM_ASK_JOURNAL,
   SYSTEM_SOCRATIC_GUIDE,
   SYSTEM_COMPASSIONATE_EMPATH,
   SYSTEM_EXECUTION_COACH,
   SYSTEM_GOAL_PROGRESS_COACHING,
-  SYSTEM_PERIODIC_REVIEW
+  SYSTEM_PERIODIC_REVIEW,
+  SYSTEM_REFLECTION_EXPLORER,
+  SYSTEM_REFLECTION_DRAFTER,
+  SYSTEM_TASK_REGENERATION
 } from '../gemini/prompts';
 import { 
   synthesizeAskJournal, 
   generateLocalProcess, 
   generateLocalStructuredReflection,
+  generateLocalGoalSuggestion,
   generateLocalGoalCoaching,
   generateLocalChatResponse, 
   generateLocalDigest,
+  generateLocalThoughtExplorer,
+  generateLocalReflectionDraft,
+  generateLocalTaskRegeneration,
   formatDateDisplay
 } from '../gemini/localFallbackEngine';
 
@@ -72,10 +80,19 @@ aiRouter.post('/process', async (req: Request, res: Response): Promise<void> => 
     if (isJson || isStructuredRequested) {
       const parsed = safeJsonParse(result.text);
       if (parsed && typeof parsed === 'object') {
+        const goalSuggestion = parsed.goalSuggestion || (parsed.hasGoal !== undefined ? parsed : undefined);
+        const structuredResponse: any = {
+          ...parsed,
+        };
+        if (goalSuggestion) {
+          structuredResponse.goalSuggestion = goalSuggestion;
+        }
+
         res.json({
           success: true,
-          result: parsed.summary || result.text,
-          structuredData: parsed,
+          result: parsed.summary || (goalSuggestion?.hasGoal ? `Goal Suggested: ${goalSuggestion.title}` : result.text),
+          structuredData: structuredResponse,
+          goalSuggestion: goalSuggestion,
           modelUsed: result.modelUsed,
           mode: mode || 'reflect',
           isLocalFallback: false,
@@ -95,12 +112,13 @@ aiRouter.post('/process', async (req: Request, res: Response): Promise<void> => 
     console.warn('[AiProcess] Live Gemini model unavailable. Activating Local Reflection Engine:', extractCleanErrorMessage(err));
     const creditsDepleted = isCreditDepletionError(err);
 
-    if (isStructuredRequested || mode === 'reflect' || mode === 'reflect_deep' || mode === 'goal_extract') {
+    if (isStructuredRequested || mode === 'reflect' || mode === 'reflect_deep' || mode === 'goal_extract' || mode === 'goal_coach') {
       const structuredData = generateLocalStructuredReflection(content, title);
       res.json({
         success: true,
         result: structuredData.summary,
         structuredData,
+        goalSuggestion: structuredData.goalSuggestion,
         modelUsed: 'Sanctuary Local Reflection Engine (Standby Mode)',
         mode: mode || 'reflect',
         isLocalFallback: true,
@@ -123,6 +141,283 @@ aiRouter.post('/process', async (req: Request, res: Response): Promise<void> => 
       notice: creditsDepleted
         ? 'Google AI Studio prepayment credits are depleted. Reflection generated seamlessly via local reflection engine.'
         : 'Generated via local standby reflection engine.',
+    });
+  }
+});
+
+/**
+ * Dedicated AI Goal & Task Suggestion endpoint
+ * Analyzes a journal reflection and extracts at most ONE actionable goal with 3-5 concrete tasks.
+ * Pure recommendation: Does NOT persist or mutate user database without user confirmation.
+ */
+aiRouter.post('/suggest-goal', async (req: Request, res: Response): Promise<void> => {
+  const { content, title } = (req.body && typeof req.body === 'object') ? req.body : {} as any;
+
+  if (!content || typeof content !== 'string' || !content.trim()) {
+    res.status(400).json({ error: 'BAD_REQUEST', message: 'Reflection content is required for goal extraction.' });
+    return;
+  }
+
+  if (content.length > 50000) {
+    res.status(400).json({ error: 'BAD_REQUEST', message: 'Content exceeds safe 50,000 character limit.' });
+    return;
+  }
+
+  const header = title ? `Journal Title: "${title}"\n\n` : '';
+  const prompt = `Analyze this journal reflection and determine if an actionable goal exists. If so, formulate ONE best goal with 3-5 concrete tasks according to your JSON schema:\n\n${header}Journal Content:\n"""\n${content.trim()}\n"""`;
+
+  try {
+    const result = await generateWithFallback(prompt, {
+      systemInstruction: SYSTEM_GOAL_EXTRACTION,
+      responseMimeType: 'application/json',
+    });
+
+    const parsed = safeJsonParse(result.text);
+    if (parsed && typeof parsed === 'object') {
+      const hasGoal = Boolean(parsed.hasGoal);
+      const cleanedSuggestion = {
+        hasGoal,
+        title: hasGoal ? String(parsed.title || 'Actionable Milestone').trim() : undefined,
+        description: hasGoal ? String(parsed.description || '').trim() : undefined,
+        reason: String(parsed.reason || '').trim(),
+        priority: (['low', 'medium', 'high'].includes(parsed.priority) ? parsed.priority : 'medium') as 'low' | 'medium' | 'high',
+        howToAchieve: hasGoal && Array.isArray(parsed.howToAchieve)
+          ? parsed.howToAchieve.map((s: any) => String(s || '').trim()).filter((s: string) => s.length > 0).slice(0, 5)
+          : undefined,
+        tasks: hasGoal && Array.isArray(parsed.tasks) 
+          ? parsed.tasks.map((t: any) => String(t || '').trim()).filter((t: string) => t.length > 0).slice(0, 5)
+          : [],
+      };
+
+      res.json({
+        success: true,
+        goalSuggestion: cleanedSuggestion,
+        modelUsed: result.modelUsed,
+        isLocalFallback: false,
+      });
+      return;
+    }
+
+    // JSON parsing fallback
+    const localSuggestion = generateLocalGoalSuggestion(content, title);
+    res.json({
+      success: true,
+      goalSuggestion: localSuggestion,
+      modelUsed: result.modelUsed,
+      isLocalFallback: false,
+    });
+  } catch (err: any) {
+    console.warn('[SuggestGoal] Live Gemini model unavailable. Activating Local Goal Engine:', extractCleanErrorMessage(err));
+    const creditsDepleted = isCreditDepletionError(err);
+    const localSuggestion = generateLocalGoalSuggestion(content, title);
+
+    res.json({
+      success: true,
+      goalSuggestion: localSuggestion,
+      modelUsed: 'Sanctuary Local Goal Engine (Standby Mode)',
+      isLocalFallback: true,
+      creditDepleted: creditsDepleted,
+      notice: creditsDepleted
+        ? 'Goal recommendation synthesized via local engine (Google AI Studio prepayment credits depleted).'
+        : undefined,
+    });
+  }
+});
+
+/**
+ * AI-Assisted Reflection Explorer Endpoint (Part 2)
+ * Takes a short thought, sentence, topic, or voice input and generates 4-6 adaptive reflection questions.
+ */
+aiRouter.post('/explore-thought', async (req: Request, res: Response): Promise<void> => {
+  const { thought } = (req.body && typeof req.body === 'object') ? req.body : {} as any;
+
+  if (!thought || typeof thought !== 'string' || !thought.trim()) {
+    res.status(400).json({ error: 'BAD_REQUEST', message: 'Initial thought or topic is required.' });
+    return;
+  }
+
+  if (thought.length > 5000) {
+    res.status(400).json({ error: 'BAD_REQUEST', message: 'Initial thought exceeds safe limit.' });
+    return;
+  }
+
+  const prompt = `The user shared this initial thought/situation for reflection:\n"""\n${thought.trim()}\n"""\n\nPlease generate adaptive, insightful reflection questions to help them explore and unpack this thought according to your JSON schema.`;
+
+  try {
+    const result = await generateWithFallback(prompt, {
+      systemInstruction: SYSTEM_REFLECTION_EXPLORER,
+      responseMimeType: 'application/json',
+    });
+
+    const parsed = safeJsonParse(result.text);
+    if (parsed && typeof parsed === 'object' && Array.isArray(parsed.questions)) {
+      res.json({
+        success: true,
+        suggestedTitle: String(parsed.suggestedTitle || 'Reflections on Today').trim(),
+        thoughtSummary: String(parsed.thoughtSummary || thought).trim(),
+        questions: parsed.questions.map((q: any) => String(q || '').trim()).filter(Boolean),
+        modelUsed: result.modelUsed,
+        isLocalFallback: false,
+      });
+      return;
+    }
+
+    const localData = generateLocalThoughtExplorer(thought);
+    res.json({
+      success: true,
+      ...localData,
+      modelUsed: result.modelUsed,
+      isLocalFallback: false,
+    });
+  } catch (err: any) {
+    console.warn('[ExploreThought] Live Gemini model unavailable. Activating Local Explorer:', extractCleanErrorMessage(err));
+    const creditsDepleted = isCreditDepletionError(err);
+    const localData = generateLocalThoughtExplorer(thought);
+
+    res.json({
+      success: true,
+      ...localData,
+      modelUsed: 'Sanctuary Local Reflection Engine (Standby Mode)',
+      isLocalFallback: true,
+      creditDepleted: creditsDepleted,
+      notice: creditsDepleted
+        ? 'Reflection exploration synthesized via local standby engine.'
+        : undefined,
+    });
+  }
+});
+
+/**
+ * AI Reflection Drafter Endpoint (Part 3 & 4)
+ * "Help me turn this into a reflection."
+ * Drafts a first-person reflection based ONLY on user-provided information.
+ * Strictly preserves user voice; never invents events, people, feelings, or facts.
+ */
+aiRouter.post('/draft-reflection', async (req: Request, res: Response): Promise<void> => {
+  const { thought, notes, questionsAndAnswers } = (req.body && typeof req.body === 'object') ? req.body : {} as any;
+
+  if (!thought && !notes && (!Array.isArray(questionsAndAnswers) || questionsAndAnswers.length === 0)) {
+    res.status(400).json({ error: 'BAD_REQUEST', message: 'Thought, notes, or answers are required to draft a reflection.' });
+    return;
+  }
+
+  let userContext = `Initial thought: "${thought || ''}"\n`;
+  if (notes) {
+    userContext += `Additional notes/context: "${notes}"\n`;
+  }
+  if (Array.isArray(questionsAndAnswers) && questionsAndAnswers.length > 0) {
+    userContext += `Answers to reflection questions:\n`;
+    questionsAndAnswers.forEach((qa: any) => {
+      if (qa && qa.answer && qa.answer.trim()) {
+        userContext += `- Q: ${qa.question || 'Reflection point'}\n  A: ${qa.answer.trim()}\n`;
+      }
+    });
+  }
+
+  const prompt = `The user requests: "Help me turn this into a reflection."\n\nUser Input Data:\n"""\n${userContext.trim()}\n"""\n\nGenerate an authentic first-person reflection draft based ONLY on the above information provided by the user. Do not invent facts, people, or events. Return valid JSON matching your schema.`;
+
+  try {
+    const result = await generateWithFallback(prompt, {
+      systemInstruction: SYSTEM_REFLECTION_DRAFTER,
+      responseMimeType: 'application/json',
+    });
+
+    const parsed = safeJsonParse(result.text);
+    if (parsed && typeof parsed === 'object' && parsed.draftContent) {
+      res.json({
+        success: true,
+        suggestedTitle: String(parsed.suggestedTitle || 'Reflections on Today').trim(),
+        draftContent: String(parsed.draftContent).trim(),
+        wordCount: typeof parsed.wordCount === 'number' ? parsed.wordCount : parsed.draftContent.split(/\s+/).length,
+        detectedThemes: Array.isArray(parsed.detectedThemes) ? parsed.detectedThemes : [],
+        modelUsed: result.modelUsed,
+        isLocalFallback: false,
+      });
+      return;
+    }
+
+    const localDraft = generateLocalReflectionDraft(thought, notes);
+    res.json({
+      success: true,
+      ...localDraft,
+      modelUsed: result.modelUsed,
+      isLocalFallback: false,
+    });
+  } catch (err: any) {
+    console.warn('[DraftReflection] Live Gemini model unavailable. Activating Local Drafter:', extractCleanErrorMessage(err));
+    const creditsDepleted = isCreditDepletionError(err);
+    const localDraft = generateLocalReflectionDraft(thought, notes);
+
+    res.json({
+      success: true,
+      ...localDraft,
+      modelUsed: 'Sanctuary Local Reflection Engine (Standby Mode)',
+      isLocalFallback: true,
+      creditDepleted: creditsDepleted,
+      notice: creditsDepleted
+        ? 'Reflection draft created via local standby engine.'
+        : undefined,
+    });
+  }
+});
+
+/**
+ * AI Task Regeneration Endpoint (Part 11)
+ * Generates an alternative set of practical tasks and how-to-achieve steps for an existing or suggested goal.
+ */
+aiRouter.post('/regenerate-tasks', async (req: Request, res: Response): Promise<void> => {
+  const { goalTitle, goalDescription, reflectionContext } = (req.body && typeof req.body === 'object') ? req.body : {} as any;
+
+  if (!goalTitle || typeof goalTitle !== 'string' || !goalTitle.trim()) {
+    res.status(400).json({ error: 'BAD_REQUEST', message: 'Goal title is required for task regeneration.' });
+    return;
+  }
+
+  const prompt = `Goal Title: "${goalTitle.trim()}"
+Description: "${goalDescription || ''}"
+${reflectionContext ? `Reflection Context:\n"""\n${reflectionContext.trim()}\n"""\n` : ''}
+
+Generate a fresh, practical set of 3-5 achievable micro-tasks and how-to-achieve steps for this goal. Return valid JSON.`;
+
+  try {
+    const result = await generateWithFallback(prompt, {
+      systemInstruction: SYSTEM_TASK_REGENERATION,
+      responseMimeType: 'application/json',
+    });
+
+    const parsed = safeJsonParse(result.text);
+    if (parsed && typeof parsed === 'object' && Array.isArray(parsed.tasks)) {
+      res.json({
+        success: true,
+        howToAchieve: Array.isArray(parsed.howToAchieve) ? parsed.howToAchieve.map((s: any) => String(s).trim()).filter(Boolean) : [],
+        tasks: parsed.tasks.map((t: any) => String(t).trim()).filter(Boolean).slice(0, 5),
+        modelUsed: result.modelUsed,
+        isLocalFallback: false,
+      });
+      return;
+    }
+
+    const localTasks = generateLocalTaskRegeneration(goalTitle, goalDescription);
+    res.json({
+      success: true,
+      ...localTasks,
+      modelUsed: result.modelUsed,
+      isLocalFallback: false,
+    });
+  } catch (err: any) {
+    console.warn('[RegenerateTasks] Live Gemini model unavailable. Activating Local Task Engine:', extractCleanErrorMessage(err));
+    const creditsDepleted = isCreditDepletionError(err);
+    const localTasks = generateLocalTaskRegeneration(goalTitle, goalDescription);
+
+    res.json({
+      success: true,
+      ...localTasks,
+      modelUsed: 'Sanctuary Local Task Engine (Standby Mode)',
+      isLocalFallback: true,
+      creditDepleted: creditsDepleted,
+      notice: creditsDepleted
+        ? 'Alternative tasks generated via local engine.'
+        : undefined,
     });
   }
 });
