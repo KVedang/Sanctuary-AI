@@ -30,6 +30,7 @@ export const GoalList: React.FC<GoalListProps> = ({ goals, onRefresh }) => {
   const [taskInput, setTaskInput] = useState('');
   const [tasks, setTasks] = useState<GoalTask[]>([]);
   const [saving, setSaving] = useState(false);
+  const [goalToDelete, setGoalToDelete] = useState<string | null>(null);
 
   const handleAddTask = () => {
     if (!taskInput.trim()) return;
@@ -113,14 +114,15 @@ export const GoalList: React.FC<GoalListProps> = ({ goals, onRefresh }) => {
 
   const handleDeleteGoal = async (goalId: string) => {
     if (!user) return;
-    if (!window.confirm('Delete this goal and its tasks?')) return;
 
     try {
       const goalRef = doc(db, 'users', user.uid, 'goals', goalId);
       await deleteDoc(goalRef);
+      setGoalToDelete(null);
       onRefresh();
     } catch (err) {
       console.error('Failed to delete goal:', err);
+      setGoalToDelete(null);
     }
   };
 
@@ -189,7 +191,7 @@ export const GoalList: React.FC<GoalListProps> = ({ goals, onRefresh }) => {
                   </div>
 
                   <button
-                    onClick={() => handleDeleteGoal(goal.id)}
+                    onClick={() => setGoalToDelete(goal.id)}
                     className="text-stone-400 hover:text-rose-600 p-1 transition cursor-pointer"
                     title="Delete Goal"
                   >
@@ -370,6 +372,48 @@ export const GoalList: React.FC<GoalListProps> = ({ goals, onRefresh }) => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* In-App Delete Goal Confirmation Modal (iFrame safe) */}
+      {goalToDelete && (
+        <div className="fixed inset-0 z-50 bg-stone-950/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-stone-200 shadow-xl max-w-sm w-full p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-serif font-semibold text-stone-950 text-base">
+                  Delete Goal?
+                </h3>
+                <p className="text-xs text-stone-500 mt-0.5">
+                  This will permanently delete this goal and its tasks.
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-stone-600 leading-relaxed">
+              Are you sure you want to remove this goal? This action cannot be undone.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setGoalToDelete(null)}
+                className="px-4 py-2 rounded-xl text-xs font-medium text-stone-600 hover:text-stone-900 bg-stone-100 hover:bg-stone-200 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteGoal(goalToDelete)}
+                className="px-4 py-2 rounded-xl text-xs font-medium bg-rose-600 hover:bg-rose-700 text-white transition cursor-pointer shadow-xs"
+              >
+                Delete Goal
+              </button>
+            </div>
           </div>
         </div>
       )}

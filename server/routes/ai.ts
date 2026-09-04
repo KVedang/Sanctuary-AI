@@ -1,26 +1,49 @@
 import { Router, Request, Response } from 'express';
-import { generateWithFallback } from '../gemini/fallbackLadder';
+import { 
+  generateWithFallback, 
+  isCreditDepletionError, 
+  extractCleanErrorMessage 
+} from '../gemini/fallbackLadder';
 import { getPromptForMode, SYSTEM_BASE_SECURITY } from '../gemini/prompts';
+import { 
+  synthesizeAskJournal, 
+  generateLocalProcess, 
+  generateLocalChatResponse, 
+  generateLocalDigest 
+} from '../gemini/localFallbackEngine';
 
 export const aiRouter = Router();
+
+/**
+ * AI Service status & health check endpoint
+ */
+aiRouter.get('/status', async (_req: Request, res: Response): Promise<void> => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    primaryModel: 'gemini-3.6-flash',
+    fallbackLadder: ['gemini-3.6-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-3.7-flash', 'gemini-3.8-flash'],
+    localFallbackReady: true,
+  });
+});
 
 /**
  * Single-shot AI reflection, summary, brainstorming, or goal extraction
  */
 aiRouter.post('/process', async (req: Request, res: Response): Promise<void> => {
+  const { mode, content, title } = (req.body && typeof req.body === 'object') ? req.body : {} as any;
+
+  if (!content || typeof content !== 'string' || !content.trim()) {
+    res.status(400).json({ error: 'BAD_REQUEST', message: 'Journal content is required.' });
+    return;
+  }
+
+  if (content.length > 50000) {
+    res.status(400).json({ error: 'BAD_REQUEST', message: 'Content exceeds safe 50,000 character limit.' });
+    return;
+  }
+
   try {
-    const { mode, content, title } = (req.body && typeof req.body === 'object') ? req.body : {} as any;
-
-    if (!content || typeof content !== 'string' || !content.trim()) {
-      res.status(400).json({ error: 'BAD_REQUEST', message: 'Journal content is required.' });
-      return;
-    }
-
-    if (content.length > 50000) {
-      res.status(400).json({ error: 'BAD_REQUEST', message: 'Content exceeds safe 50,000 character limit.' });
-      return;
-    }
-
     const { prompt, systemInstruction } = getPromptForMode(mode || 'reflect', content, title);
     const result = await generateWithFallback(prompt, { systemInstruction });
 
@@ -29,12 +52,23 @@ aiRouter.post('/process', async (req: Request, res: Response): Promise<void> => 
       result: result.text,
       modelUsed: result.modelUsed,
       mode: mode || 'reflect',
+      isLocalFallback: false,
     });
   } catch (err: any) {
-    console.error('AI process error:', err?.message || err);
-    res.status(500).json({
-      error: 'AI_SERVICE_ERROR',
-      message: 'The AI service encountered an error. Your entry has not been lost.',
+    console.warn('[AiProcess] Live Gemini model unavailable. Activating Local Reflection Engine:', extractCleanErrorMessage(err));
+    const localResult = generateLocalProcess(mode || 'reflect', content, title);
+    const creditsDepleted = isCreditDepletionError(err);
+
+    res.json({
+      success: true,
+      result: localResult,
+      modelUsed: 'Sanctuary Local Reflection Engine (Standby Mode)',
+      mode: mode || 'reflect',
+      isLocalFallback: true,
+      creditDepleted: creditsDepleted,
+      notice: creditsDepleted
+        ? 'Google AI Studio prepayment credits are depleted. Reflection generated seamlessly via local reflection engine.'
+        : 'Generated via local standby reflection engine.',
     });
   }
 });
@@ -43,23 +77,21 @@ aiRouter.post('/process', async (req: Request, res: Response): Promise<void> => 
  * Multi-turn Chat Conversation turn with the AI Assistant
  */
 aiRouter.post('/chat', async (req: Request, res: Response): Promise<void> => {
+  const { messages, currentPrompt, mode, rollingSummary, journalContext } = (req.body && typeof req.body === 'object') ? req.body : {} as any;
+
+  if (!currentPrompt || typeof currentPrompt !== 'string' || !currentPrompt.trim()) {
+    res.status(400).json({ error: 'BAD_REQUEST', message: 'Prompt cannot be empty.' });
+    return;
+  }
+
+  if (currentPrompt.length > 20000) {
+    res.status(400).json({ error: 'BAD_REQUEST', message: 'Message exceeds safe 20,000 character limit.' });
+    return;
+  }
+
+  const recentMessages = Array.isArray(messages) ? messages.slice(-8) : [];
+
   try {
-    const { messages, currentPrompt, mode, rollingSummary, journalContext } = (req.body && typeof req.body === 'object') ? req.body : {} as any;
-
-    if (!currentPrompt || typeof currentPrompt !== 'string' || !currentPrompt.trim()) {
-      res.status(400).json({ error: 'BAD_REQUEST', message: 'Prompt cannot be empty.' });
-      return;
-    }
-
-    if (currentPrompt.length > 20000) {
-      res.status(400).json({ error: 'BAD_REQUEST', message: 'Message exceeds safe 20,000 character limit.' });
-      return;
-    }
-
-    // Context Compaction Protocol:
-    // Retain rolling summary + latest 8 turns + current prompt
-    const recentMessages = Array.isArray(messages) ? messages.slice(-8) : [];
-
     let contextSnippet = '';
     if (journalContext && typeof journalContext === 'string' && journalContext.trim()) {
       contextSnippet += `### Context from User's Recent Journal Entries:\n${journalContext.trim()}\n\n`;
@@ -95,12 +127,22 @@ aiRouter.post('/chat', async (req: Request, res: Response): Promise<void> => {
       success: true,
       result: result.text,
       modelUsed: result.modelUsed,
+      isLocalFallback: false,
     });
   } catch (err: any) {
-    console.error('AI chat error:', err?.message || err);
-    res.status(500).json({
-      error: 'AI_CHAT_ERROR',
-      message: 'Failed to generate AI response. Please retry.',
+    console.warn('[AiChat] Live Gemini model unavailable. Activating Local Companion Engine:', extractCleanErrorMessage(err));
+    const localReply = generateLocalChatResponse(currentPrompt, mode || 'socratic', recentMessages, journalContext);
+    const creditsDepleted = isCreditDepletionError(err);
+
+    res.json({
+      success: true,
+      result: localReply,
+      modelUsed: 'Sanctuary Local Companion (Standby Mode)',
+      isLocalFallback: true,
+      creditDepleted: creditsDepleted,
+      notice: creditsDepleted
+        ? 'Operating in local reflective companion mode (Google AI Studio prepayment credits depleted).'
+        : undefined,
     });
   }
 });
@@ -111,17 +153,17 @@ aiRouter.post('/chat', async (req: Request, res: Response): Promise<void> => {
  * Context is passed authoritatively by the user's authenticated scope.
  */
 aiRouter.post('/ask-journal', async (req: Request, res: Response): Promise<void> => {
+  const { question, journalExcerpts } = (req.body && typeof req.body === 'object') ? req.body : {} as any;
+
+  if (!question || typeof question !== 'string') {
+    res.status(400).json({ error: 'BAD_REQUEST', message: 'Question is required.' });
+    return;
+  }
+
+  const safeExcerpts = Array.isArray(journalExcerpts) ? journalExcerpts.slice(0, 15) : [];
+
   try {
-    const { question, journalExcerpts } = (req.body && typeof req.body === 'object') ? req.body : {} as any;
-
-    if (!question || typeof question !== 'string') {
-      res.status(400).json({ error: 'BAD_REQUEST', message: 'Question is required.' });
-      return;
-    }
-
-    const safeExcerpts = Array.isArray(journalExcerpts) ? journalExcerpts.slice(0, 15) : [];
     let journalContext = '';
-
     if (safeExcerpts.length === 0) {
       journalContext = 'No relevant historical journal entries were found for this query.';
     } else {
@@ -153,12 +195,22 @@ Please answer the user's question clearly and thoughtfully:
       success: true,
       answer: result.text,
       modelUsed: result.modelUsed,
+      isLocalFallback: false,
     });
   } catch (err: any) {
-    console.error('Ask journal error:', err?.message || err);
-    res.status(500).json({
-      error: 'ASK_JOURNAL_ERROR',
-      message: 'Failed to analyze journal history. Please try again.',
+    console.warn('[AskJournal] Live Gemini model unavailable. Activating Local Semantic Engine:', extractCleanErrorMessage(err));
+    const localAnswer = synthesizeAskJournal(question, safeExcerpts);
+    const creditsDepleted = isCreditDepletionError(err);
+
+    res.json({
+      success: true,
+      answer: localAnswer,
+      modelUsed: 'Local Semantic Search Engine (Standby Mode)',
+      isLocalFallback: true,
+      creditDepleted: creditsDepleted,
+      notice: creditsDepleted
+        ? 'Google AI Studio prepayment credits are depleted. Sanctuary AI seamlessly analyzed your private journal using the local semantic engine.'
+        : 'Cloud AI service is temporarily in standby. Answer synthesized via local semantic search.',
     });
   }
 });
@@ -167,14 +219,14 @@ Please answer the user's question clearly and thoughtfully:
  * Periodic reflection generator (Daily, Weekly, Monthly)
  */
 aiRouter.post('/periodic-digest', async (req: Request, res: Response): Promise<void> => {
+  const { periodType, entries } = (req.body && typeof req.body === 'object') ? req.body : {} as any;
+
+  if (!Array.isArray(entries) || entries.length === 0) {
+    res.status(400).json({ error: 'BAD_REQUEST', message: 'No entries provided for this period.' });
+    return;
+  }
+
   try {
-    const { periodType, entries } = (req.body && typeof req.body === 'object') ? req.body : {} as any;
-
-    if (!Array.isArray(entries) || entries.length === 0) {
-      res.status(400).json({ error: 'BAD_REQUEST', message: 'No entries provided for this period.' });
-      return;
-    }
-
     let summaryText = `Journal entries for ${periodType || 'weekly'} review:\n\n`;
     entries.slice(0, 20).forEach((entry, i) => {
       summaryText += `Entry ${i + 1} (${entry.createdAt || ''}): "${entry.title}"\n${(entry.content || '').substring(0, 800)}\n\n`;
@@ -197,12 +249,22 @@ ${summaryText}`;
       success: true,
       digest: result.text,
       modelUsed: result.modelUsed,
+      isLocalFallback: false,
     });
   } catch (err: any) {
-    console.error('Periodic digest error:', err?.message || err);
-    res.status(500).json({
-      error: 'DIGEST_ERROR',
-      message: 'Failed to generate periodic digest.',
+    console.warn('[PeriodicDigest] Live Gemini model unavailable. Activating Local Digest Engine:', extractCleanErrorMessage(err));
+    const localDigest = generateLocalDigest(periodType || 'weekly', entries);
+    const creditsDepleted = isCreditDepletionError(err);
+
+    res.json({
+      success: true,
+      digest: localDigest,
+      modelUsed: 'Sanctuary Local Digest Engine (Standby Mode)',
+      isLocalFallback: true,
+      creditDepleted: creditsDepleted,
+      notice: creditsDepleted
+        ? 'Synthesized via local digest engine (Google AI Studio prepayment credits depleted).'
+        : undefined,
     });
   }
 });

@@ -1,14 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   Sparkles, 
-  Calendar, 
-  TrendingUp, 
   Loader2, 
-  FileText, 
-  Award,
-  AlertTriangle,
-  Lightbulb,
-  ShieldCheck
+  TrendingUp, 
+  Smile, 
+  Calendar, 
+  AlertCircle,
+  ExternalLink
 } from 'lucide-react';
 import { JournalEntry } from '../../types';
 import { useApi } from '../../hooks/useApi';
@@ -22,40 +20,51 @@ export const InsightsView: React.FC<InsightsViewProps> = ({ entries }) => {
   const [periodType, setPeriodType] = useState<'weekly' | 'monthly'>('weekly');
   const [loading, setLoading] = useState(false);
   const [digest, setDigest] = useState<string | null>(null);
+  const [modelUsed, setModelUsed] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Frequency analysis
-  const moodCounts: Record<string, number> = {};
-  entries.forEach((e) => {
-    if (e.mood) {
-      moodCounts[e.mood] = (moodCounts[e.mood] || 0) + 1;
-    }
-  });
-
-  const tagCounts: Record<string, number> = {};
-  entries.forEach((e) => {
-    e.tags.forEach((t) => {
-      tagCounts[t] = (tagCounts[t] || 0) + 1;
+  // Derive stats locally to protect user data isolation
+  const topTags = useMemo(() => {
+    const tagCounts: Record<string, number> = {};
+    entries.forEach((e) => {
+      (e.tags || []).forEach((tag) => {
+        tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+      });
     });
-  });
+    return Object.entries(tagCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5);
+  }, [entries]);
 
-  const topTags = Object.entries(tagCounts)
-    .sort((a, b) => (b[1] as number) - (a[1] as number))
-    .slice(0, 6);
+  const moodBreakdown = useMemo(() => {
+    const counts: Record<string, number> = {
+      grounded: 0,
+      grateful: 0,
+      reflective: 0,
+      energized: 0,
+      anxious: 0,
+      unspecified: 0,
+    };
+    entries.forEach((e) => {
+      const m = e.mood || 'unspecified';
+      counts[m] = (counts[m] || 0) + 1;
+    });
+    return counts;
+  }, [entries]);
 
   const handleGenerateDigest = async () => {
-    if (entries.length === 0) {
-      setError('You need at least 1 journal entry to generate an AI reflection digest.');
-      return;
-    }
+    if (entries.length === 0) return;
 
     setLoading(true);
     setError(null);
     setDigest(null);
+    setNotice(null);
 
-    const safeEntries = entries.slice(0, 15).map((e) => ({
+    const safeEntries = entries.slice(0, 20).map((e) => ({
       title: e.title,
       content: e.content,
+      mood: e.mood,
       tags: e.tags,
       createdAt: e.createdAt,
     }));
@@ -71,9 +80,17 @@ export const InsightsView: React.FC<InsightsViewProps> = ({ entries }) => {
 
       if (data.digest) {
         setDigest(data.digest);
+        setModelUsed(data.modelUsed || null);
+        if (data.notice) {
+          setNotice(data.notice);
+        }
       }
     } catch (err: any) {
-      setError(err?.message || 'Failed to generate periodic review.');
+      const raw = String(err?.message || err || '');
+      const clean = raw.includes('prepayment credits') || raw.includes('429')
+        ? 'Google AI Studio prepayment credits are depleted. Please visit https://ai.studio/projects to manage billing.'
+        : raw.replace(/All Gemini models in fallback ladder failed:\s*/i, '').trim();
+      setError(clean || 'Failed to generate periodic review.');
     } finally {
       setLoading(false);
     }
@@ -118,35 +135,38 @@ export const InsightsView: React.FC<InsightsViewProps> = ({ entries }) => {
         {/* Mood Breakdown */}
         <div className="p-5 rounded-2xl bg-white border border-stone-200/80 shadow-xs space-y-3">
           <div className="flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-emerald-500" />
+            <Smile className="w-4 h-4 text-emerald-500" />
             <h3 className="font-serif font-semibold text-stone-900 text-sm">
-              Mood Landscape
+              Emotional States
             </h3>
           </div>
-          {Object.keys(moodCounts).length === 0 ? (
-            <p className="text-xs text-stone-400">No mood data recorded yet.</p>
-          ) : (
-            <div className="space-y-2">
-              {Object.entries(moodCounts).map(([m, count]) => (
-                <div key={m} className="flex items-center justify-between text-xs capitalize">
-                  <span className="text-stone-700 font-medium">{m}</span>
-                  <span className="text-stone-400 font-mono">{count} times</span>
-                </div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            {Object.entries(moodBreakdown)
+              .filter(([_, count]) => (count as number) > 0)
+              .map(([mood, count]) => (
+                <span
+                  key={mood}
+                  className="px-2.5 py-1 rounded-lg bg-stone-100 text-stone-700 font-medium capitalize"
+                >
+                  {mood}: <strong className="font-semibold text-stone-900">{count}</strong>
+                </span>
               ))}
-            </div>
-          )}
+          </div>
         </div>
 
-        {/* Data Isolation Notice */}
-        <div className="p-5 rounded-2xl bg-amber-50/60 border border-amber-200/70 shadow-xs space-y-2.5">
-          <div className="flex items-center gap-2 text-amber-900">
-            <ShieldCheck className="w-4 h-4 text-amber-600" />
-            <h3 className="font-serif font-semibold text-sm">
-              AI Insight Transparency
+        {/* Total Depth */}
+        <div className="p-5 rounded-2xl bg-white border border-stone-200/80 shadow-xs space-y-2">
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-amber-600" />
+            <h3 className="font-serif font-semibold text-stone-900 text-sm">
+              Reflection Archive
             </h3>
           </div>
-          <p className="text-xs text-amber-800/90 leading-relaxed">
-            All observations are derived strictly from your authenticated account’s data. AI insights are supportive coaching perspectives, never medical diagnoses.
+          <div className="text-2xl font-serif font-bold text-stone-950">
+            {entries.length} <span className="text-xs font-sans font-normal text-stone-500">entries saved</span>
+          </div>
+          <p className="text-[11px] text-stone-400">
+            Encrypted in your private Firestore collection under strict user-bound authorization.
           </p>
         </div>
       </div>
@@ -159,7 +179,7 @@ export const InsightsView: React.FC<InsightsViewProps> = ({ entries }) => {
               Periodic Reflection Digest
             </h3>
             <p className="text-xs text-stone-500 mt-0.5">
-              Let Gemini analyze your experiences across a chosen timeframe to highlight wins, lessons, and upcoming priorities.
+              Analyze your experiences across a chosen timeframe to highlight wins, lessons, and upcoming priorities.
             </p>
           </div>
 
@@ -189,17 +209,47 @@ export const InsightsView: React.FC<InsightsViewProps> = ({ entries }) => {
           </div>
         </div>
 
+        {/* Notice Banner */}
+        {notice && (
+          <div className="p-3 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-900 text-xs flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>{notice}</span>
+            </div>
+            <a
+              href="https://ai.studio/projects"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 font-semibold text-amber-950 underline shrink-0"
+            >
+              AI Studio <ExternalLink className="w-3 h-3" />
+            </a>
+          </div>
+        )}
+
         {error && (
-          <div className="p-3 text-xs bg-rose-50 border border-rose-200 text-rose-700 rounded-xl">
-            {error}
+          <div className="p-3 text-xs bg-rose-50 border border-rose-200 text-rose-700 rounded-xl flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{error}</span>
           </div>
         )}
 
         {digest && (
           <div className="p-6 rounded-2xl bg-stone-50 border border-stone-200/90 space-y-3">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-stone-500">
-              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-              <span>AI {periodType} Reflection Digest</span>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-stone-600">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                <span>{periodType} Reflection Digest</span>
+              </div>
+              {modelUsed && (
+                <span className={`text-[10px] font-mono px-2 py-0.5 rounded ${
+                  modelUsed.includes('Local') || modelUsed.includes('Standby')
+                    ? 'bg-amber-100 text-amber-800 border border-amber-200 font-medium'
+                    : 'bg-stone-200 text-stone-600'
+                }`}>
+                  {modelUsed}
+                </span>
+              )}
             </div>
 
             <div className="prose prose-stone prose-sm max-w-none text-stone-800 leading-relaxed whitespace-pre-wrap font-sans">

@@ -55,6 +55,7 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showVoiceModal, setShowVoiceModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   const wordCount = countWords(content);
 
@@ -125,15 +126,16 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
 
   const handleDelete = async () => {
     if (!user || !initialEntry?.id) return;
-    if (!window.confirm('Are you sure you want to delete this reflection permanently?')) return;
 
     try {
       const entryRef = doc(db, 'users', user.uid, 'journals', initialEntry.id);
       await deleteDoc(entryRef);
+      setShowDeleteModal(false);
       onSaved();
       onBack();
     } catch (err: any) {
       setSaveError(err?.message || 'Failed to delete journal entry.');
+      setShowDeleteModal(false);
     }
   };
 
@@ -202,7 +204,7 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
 
           {initialEntry && (
             <button
-              onClick={handleDelete}
+              onClick={() => setShowDeleteModal(true)}
               className="p-1.5 rounded-lg border border-rose-200 text-rose-500 hover:bg-rose-50 transition cursor-pointer"
               title="Delete Entry"
             >
@@ -341,6 +343,48 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
         onClose={() => setShowVoiceModal(false)}
         onConfirmText={handleVoiceConfirm}
       />
+
+      {/* In-App Delete Confirmation Modal (iframe safe) */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 bg-stone-950/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-stone-200 shadow-xl max-w-sm w-full p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-serif font-semibold text-stone-950 text-base">
+                  Delete Reflection?
+                </h3>
+                <p className="text-xs text-stone-500 mt-0.5">
+                  This action permanently removes this journal entry.
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-stone-600 leading-relaxed">
+              Are you sure you want to delete this reflection? Once deleted, it cannot be restored.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowDeleteModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-medium text-stone-600 hover:text-stone-900 bg-stone-100 hover:bg-stone-200 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                className="px-4 py-2 rounded-xl text-xs font-medium bg-rose-600 hover:bg-rose-700 text-white transition cursor-pointer shadow-xs"
+              >
+                Delete Reflection
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

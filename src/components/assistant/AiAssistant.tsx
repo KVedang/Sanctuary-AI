@@ -10,17 +10,18 @@ import {
   Target, 
   Loader2, 
   ShieldCheck, 
-  HelpCircle,
   Compass,
   HeartHandshake,
   Lightbulb,
-  ArrowUpRight
+  AlertCircle,
+  Trash2,
+  X
 } from 'lucide-react';
 import { JournalEntry, ChatMessage, Goal } from '../../types';
 import { useApi } from '../../hooks/useApi';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../lib/firebase';
-import { collection, doc, setDoc, getDocs, query, orderBy, limit } from 'firebase/firestore';
+import { collection, doc, setDoc, getDocs, deleteDoc, query, orderBy, limit } from 'firebase/firestore';
 import { sanitizePayload, formatDate, parseFirestoreDate } from '../../lib/utils';
 
 interface AiAssistantProps {
@@ -41,6 +42,9 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({
 
   const [persona, setPersona] = useState<AssistantPersona>('socratic');
   const [includeJournalContext, setIncludeJournalContext] = useState(true);
+  const [sessionId, setSessionId] = useState<string>(() => {
+    return localStorage.getItem('sanctuary_assistant_session_id') || 'main_reflection_session';
+  });
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [lastAttemptedPrompt, setLastAttemptedPrompt] = useState('');
@@ -48,6 +52,8 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [savedActionMsg, setSavedActionMsg] = useState<string | null>(null);
+  const [showNewSessionModal, setShowNewSessionModal] = useState(false);
+  const [clearHistoryOnNewSession, setClearHistoryOnNewSession] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -57,15 +63,15 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
-  // Load existing conversation on initial mount
+  // Load existing conversation on initial mount or when sessionId changes
   useEffect(() => {
     if (!user) return;
 
     let isMounted = true;
     async function loadRecentMessages() {
       try {
-        const msgsRef = collection(db, 'users', user!.uid, 'conversations', 'main_reflection_session', 'messages');
-        const q = query(msgsRef, orderBy('createdAt', 'asc'), limit(30));
+        const msgsRef = collection(db, 'users', user!.uid, 'conversations', sessionId, 'messages');
+        const q = query(msgsRef, orderBy('createdAt', 'asc'), limit(50));
         const snapshot = await getDocs(q);
 
         if (!isMounted) return;
@@ -82,6 +88,8 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({
             });
           });
           setMessages(loaded);
+        } else {
+          setMessages([]);
         }
       } catch (err) {
         console.warn('Could not load prior messages:', err);
@@ -92,7 +100,7 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [user]);
+  }, [user, sessionId]);
 
   const promptSuggestions = [
     {
@@ -117,11 +125,74 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({
     },
   ];
 
+  /**
+   * Starts a brand-new reflection session.
+   * Completely safe inside iframes without window.confirm.
+   */
+  const handleStartNewSession = async (purgeOldMessages = false) => {
+    const oldSessionId = sessionId;
+    const newSessionId = `session_${Date.now()}`;
+
+    // Optionally delete old session messages from Firestore
+    if (purgeOldMessages && user) {
+      try {
+        const oldMsgsRef = collection(db, 'users', user.uid, 'conversations', oldSessionId, 'messages');
+        const oldSnapshot = await getDocs(oldMsgsRef);
+        const deletes = oldSnapshot.docs.map((docSnap) => deleteDoc(docSnap.ref));
+        await Promise.all(deletes);
+      } catch (err) {
+        console.warn('Could not purge old session messages:', err);
+      }
+    }
+
+    // Register new session in Firestore if authenticated
+    if (user) {
+      try {
+        const convRef = doc(db, 'users', user.uid, 'conversations', newSessionId);
+        await setDoc(convRef, sanitizePayload({
+          id: newSessionId,
+          userId: user.uid,
+          title: `Session ${new Date().toLocaleDateString()}`,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }));
+      } catch (err) {
+        console.warn('Could not save new conversation metadata:', err);
+      }
+    }
+
+    // Persist new session ID
+    localStorage.setItem('sanctuary_assistant_session_id', newSessionId);
+    setSessionId(newSessionId);
+    setMessages([]);
+    setError(null);
+    setInput('');
+    setShowNewSessionModal(false);
+    setSavedActionMsg('Started a fresh reflection session. A clean slate is ready.');
+    setTimeout(() => setSavedActionMsg(null), 3500);
+  };
+
   const handleSend = async (overridePrompt?: string) => {
     const textToSend = overridePrompt || input;
     if (!textToSend.trim() || loading) return;
 
     const trimmedText = textToSend.trim();
+
+    // Natural Language Command Detection:
+    // If the user types "new session", "start over", "clear chat", etc.
+    const lower = trimmedText.toLowerCase();
+    if (
+      lower === 'new session' ||
+      lower === 'start new session' ||
+      lower === 'start over' ||
+      lower === 'clear chat' ||
+      lower === 'reset' ||
+      lower === '/new'
+    ) {
+      await handleStartNewSession(false);
+      return;
+    }
+
     setError(null);
     setLastAttemptedPrompt(trimmedText);
     setInput('');
@@ -152,9 +223,9 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({
     }
 
     try {
-      // Save user message to Firestore subcollection
+      // Save user message to Firestore subcollection under active sessionId
       if (user) {
-        const userMsgDocRef = doc(db, 'users', user.uid, 'conversations', 'main_reflection_session', 'messages', userMessageId);
+        const userMsgDocRef = doc(db, 'users', user.uid, 'conversations', sessionId, 'messages', userMessageId);
         await setDoc(userMsgDocRef, sanitizePayload({
           id: userMessage.id,
           role: userMessage.role,
@@ -186,9 +257,9 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({
 
       setMessages([...newMessages, assistantMessage]);
 
-      // Save assistant message to Firestore subcollection
+      // Save assistant message to Firestore subcollection under active sessionId
       if (user) {
-        const asstMsgDocRef = doc(db, 'users', user.uid, 'conversations', 'main_reflection_session', 'messages', assistantMessageId);
+        const asstMsgDocRef = doc(db, 'users', user.uid, 'conversations', sessionId, 'messages', assistantMessageId);
         await setDoc(asstMsgDocRef, sanitizePayload({
           id: assistantMessage.id,
           role: assistantMessage.role,
@@ -199,7 +270,11 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({
       }
     } catch (err: any) {
       console.error('Failed to chat with AI Assistant:', err);
-      setError(err?.message || 'Failed to reach AI assistant. Please check your network and retry.');
+      const raw = String(err?.message || err || '');
+      const clean = raw.includes('prepayment credits') || raw.includes('429')
+        ? 'Google AI Studio prepayment credits are depleted. Please visit https://ai.studio/projects to manage your project billing.'
+        : raw.replace(/All Gemini models in fallback ladder failed:\s*/i, '').trim();
+      setError(clean || 'Failed to reach AI assistant. Please check your network and retry.');
       // Restore input buffer so user never loses their drafted reflection
       setInput(trimmedText);
     } finally {
@@ -266,13 +341,6 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({
     }
   };
 
-  const handleClearSession = () => {
-    if (confirm('Start a fresh conversation session? (Previous turns will remain safely in Firestore history)')) {
-      setMessages([]);
-      setError(null);
-    }
-  };
-
   return (
     <div className="flex flex-col h-screen max-w-5xl mx-auto px-4 sm:px-6 py-6 font-sans">
       {/* Top Header Card */}
@@ -298,15 +366,15 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({
             </div>
           </div>
 
-          {/* Right Action: New Session */}
+          {/* Right Action: New Session Trigger */}
           <div className="flex items-center gap-2">
             <button
               id="assistant-clear-session-btn"
-              onClick={handleClearSession}
+              onClick={() => setShowNewSessionModal(true)}
               title="Start a fresh conversation"
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-600 hover:text-stone-900 bg-stone-100 hover:bg-stone-200 rounded-lg transition cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-stone-700 hover:text-stone-900 bg-stone-100 hover:bg-stone-200/90 border border-stone-200/80 rounded-xl transition cursor-pointer shadow-2xs"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
+              <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
               <span>New Session</span>
             </button>
           </div>
@@ -357,22 +425,27 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({
         </div>
       </div>
 
-      {/* Action Notification Toast */}
+      {/* Floating Action / Feedback Banner */}
       {savedActionMsg && (
-        <div className="mb-3 px-4 py-2 bg-amber-50 border border-amber-200 text-amber-900 text-xs rounded-xl flex items-center gap-2 animate-fade-in">
-          <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
-          <span>{savedActionMsg}</span>
+        <div className="mb-3 px-4 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-medium flex items-center justify-between gap-2 shadow-xs transition animate-fade-in">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-amber-600" />
+            <span>{savedActionMsg}</span>
+          </div>
+          <button onClick={() => setSavedActionMsg(null)} className="text-amber-700 hover:text-amber-950">
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
-      {/* Messages Scroll Area */}
-      <div className="flex-1 overflow-y-auto bg-stone-50/50 border border-stone-200/80 rounded-2xl p-4 sm:p-6 space-y-4 shadow-inner">
+      {/* Chat Messages Area */}
+      <div className="flex-1 overflow-y-auto space-y-4 pr-1 min-h-0">
         {messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-center p-6 max-w-lg mx-auto">
-            <div className="w-12 h-12 rounded-2xl bg-amber-100/60 text-amber-800 border border-amber-200/50 flex items-center justify-center mb-4">
-              <Bot className="w-6 h-6 text-amber-700" />
+          <div className="h-full flex flex-col items-center justify-center text-center p-6 bg-stone-50/60 border border-dashed border-stone-200 rounded-2xl max-w-xl mx-auto my-auto">
+            <div className="w-12 h-12 rounded-2xl bg-amber-100/70 border border-amber-200 text-amber-800 flex items-center justify-center mb-4 shadow-2xs">
+              <Sparkles className="w-6 h-6 text-amber-600" />
             </div>
-            <h2 className="font-serif font-semibold text-stone-900 text-base mb-1">
+            <h2 className="font-serif text-lg font-semibold text-stone-800 mb-1">
               How can I support your reflection today?
             </h2>
             <p className="text-xs text-stone-500 mb-6 leading-relaxed">
@@ -387,7 +460,7 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({
                     key={idx}
                     id={`assistant-suggestion-${idx}`}
                     onClick={() => handleSend(item.prompt)}
-                    className="p-3 bg-white hover:bg-stone-50 border border-stone-200/90 rounded-xl transition text-xs group cursor-pointer hover:border-amber-300"
+                    className="p-3 bg-white hover:bg-stone-50 border border-stone-200/90 rounded-xl transition text-xs group cursor-pointer hover:border-amber-300 shadow-2xs"
                   >
                     <div className="flex items-center gap-2 font-medium text-stone-800 mb-1">
                       <Icon className="w-3.5 h-3.5 text-amber-600" />
@@ -429,7 +502,11 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({
                     </span>
                     <div className="flex items-center gap-2 opacity-60 font-mono text-[10px]">
                       {!isUser && (
-                        <span className="px-1.5 py-0.2 bg-stone-100 text-stone-600 rounded">
+                        <span className={`px-1.5 py-0.5 rounded ${
+                          msg.model?.includes('Local') || msg.model?.includes('Standby')
+                            ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                            : 'bg-stone-100 text-stone-600'
+                        }`}>
                           {msg.model}
                         </span>
                       )}
@@ -438,7 +515,7 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({
                   </div>
 
                   {/* Message Body */}
-                  <div className="whitespace-pre-wrap leading-relaxed space-y-2">
+                  <div className="whitespace-pre-wrap leading-relaxed space-y-2 font-sans">
                     {msg.content}
                   </div>
 
@@ -565,6 +642,75 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({
           Sanctuary AI is a confidential reflection guide. Not a substitute for professional mental health counseling.
         </p>
       </div>
+
+      {/* In-App New Session Confirmation Modal (iFrame safe, zero window.confirm) */}
+      {showNewSessionModal && (
+        <div className="fixed inset-0 z-50 bg-stone-950/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-stone-200 shadow-xl max-w-md w-full p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-900 flex items-center justify-center shrink-0">
+                  <RotateCcw className="w-5 h-5 text-amber-700" />
+                </div>
+                <div>
+                  <h3 className="font-serif font-semibold text-stone-950 text-base">
+                    Start a New Session?
+                  </h3>
+                  <p className="text-xs text-stone-500 mt-0.5">
+                    Begin a fresh conversation with prompt ideas.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowNewSessionModal(false)}
+                className="text-stone-400 hover:text-stone-700 p-1 rounded-lg hover:bg-stone-100 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-stone-600 leading-relaxed font-sans">
+              Starting a new session clears your active chat screen so you can focus on a new topic without old conversation clutter.
+            </p>
+
+            <label className="flex items-center gap-2.5 p-3 rounded-xl bg-stone-50 border border-stone-200/80 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                id="clear-history-checkbox"
+                checked={clearHistoryOnNewSession}
+                onChange={(e) => setClearHistoryOnNewSession(e.target.checked)}
+                className="rounded border-stone-300 text-amber-500 focus:ring-amber-400"
+              />
+              <div className="text-xs">
+                <span className="font-medium text-stone-800">Clear previous session messages</span>
+                <p className="text-[11px] text-stone-500">
+                  Removes prior messages from this device and Firestore history.
+                </p>
+              </div>
+            </label>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                id="cancel-new-session-btn"
+                type="button"
+                onClick={() => setShowNewSessionModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-medium text-stone-600 hover:text-stone-900 bg-stone-100 hover:bg-stone-200 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                id="confirm-new-session-btn"
+                type="button"
+                onClick={() => handleStartNewSession(clearHistoryOnNewSession)}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-medium bg-amber-400 hover:bg-amber-300 text-stone-950 transition cursor-pointer shadow-xs font-sans"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-stone-950" />
+                <span>Start New Session</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,36 +1,44 @@
 import React, { useState } from 'react';
 import { 
-  Compass, 
   Search, 
   Sparkles, 
   Loader2, 
-  HelpCircle, 
-  BookOpen, 
-  ArrowRight,
-  ShieldCheck
+  Compass, 
+  ShieldCheck, 
+  AlertCircle,
+  ExternalLink,
+  BookOpen
 } from 'lucide-react';
 import { JournalEntry } from '../../types';
 import { useApi } from '../../hooks/useApi';
 
 interface AskMyJournalProps {
   entries: JournalEntry[];
-  onSelectEntry: (entry: JournalEntry) => void;
 }
 
-export const AskMyJournal: React.FC<AskMyJournalProps> = ({ entries, onSelectEntry }) => {
+export const AskMyJournal: React.FC<AskMyJournalProps> = ({ entries }) => {
   const { authenticatedFetch } = useApi();
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
   const [answer, setAnswer] = useState<string | null>(null);
   const [modelUsed, setModelUsed] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const sampleQuestions = [
-    'What have been my recurring sources of stress or friction lately?',
-    'What key goals or accomplishments did I celebrate recently?',
+    'What recurring themes or lessons came up recently?',
+    'What key goals or accomplishments did I celebrate?',
     'What patterns or habits have I mentioned wanting to break?',
-    'Summarize my main learning points across all entries.',
+    'Summarize my main insights across all entries.',
   ];
+
+  const cleanErrorMessage = (err: any): string => {
+    const raw = String(err?.message || err || '');
+    if (raw.includes('prepayment credits') || raw.includes('429') || raw.includes('RESOURCE_EXHAUSTED')) {
+      return 'Google AI Studio prepayment credits are depleted. Sanctuary AI will answer via local semantic search.';
+    }
+    return raw.replace(/All Gemini models in fallback ladder failed:\s*/i, '').trim() || 'Failed to query your journal.';
+  };
 
   const handleAsk = async (queryText?: string) => {
     const activeQuery = queryText || question;
@@ -39,6 +47,7 @@ export const AskMyJournal: React.FC<AskMyJournalProps> = ({ entries, onSelectEnt
     setLoading(true);
     setError(null);
     setAnswer(null);
+    setNotice(null);
 
     // Filter relevant excerpts strictly from the current user's local entries
     // This guarantees user data isolation before sending context to backend
@@ -62,9 +71,12 @@ export const AskMyJournal: React.FC<AskMyJournalProps> = ({ entries, onSelectEnt
       if (data.answer) {
         setAnswer(data.answer);
         setModelUsed(data.modelUsed);
+        if (data.notice) {
+          setNotice(data.notice);
+        }
       }
     } catch (err: any) {
-      setError(err?.message || 'Failed to query your journal.');
+      setError(cleanErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -82,7 +94,7 @@ export const AskMyJournal: React.FC<AskMyJournalProps> = ({ entries, onSelectEnt
           Ask My Journal
         </h1>
         <p className="text-xs sm:text-sm text-stone-600 font-sans leading-relaxed">
-          Ask natural-language questions about your historical writing. Gemini synthesizes themes, lessons, and patterns strictly from your private archives.
+          Ask natural-language questions about your historical writing. Synthesizes themes, lessons, and patterns strictly from your private archives.
         </p>
       </div>
 
@@ -144,9 +156,28 @@ export const AskMyJournal: React.FC<AskMyJournalProps> = ({ entries, onSelectEnt
         </div>
       </div>
 
+      {/* Fallback Notice Banner */}
+      {notice && (
+        <div className="p-4 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-900 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-center gap-2.5">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>{notice}</span>
+          </div>
+          <a
+            href="https://ai.studio/projects"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 font-semibold text-amber-950 underline hover:text-amber-800 shrink-0"
+          >
+            Manage Billing in AI Studio <ExternalLink className="w-3 h-3" />
+          </a>
+        </div>
+      )}
+
       {error && (
-        <div className="p-4 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl">
-          {error}
+        <div className="p-4 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+          <span>{error}</span>
         </div>
       )}
 
@@ -161,8 +192,12 @@ export const AskMyJournal: React.FC<AskMyJournalProps> = ({ entries, onSelectEnt
               </h3>
             </div>
             {modelUsed && (
-              <span className="text-[10px] font-mono text-stone-400 bg-stone-100 px-2 py-0.5 rounded">
-                Model: {modelUsed}
+              <span className={`text-[10px] font-mono px-2 py-0.5 rounded ${
+                modelUsed.includes('Local')
+                  ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                  : 'bg-stone-100 text-stone-500'
+              }`}>
+                {modelUsed}
               </span>
             )}
           </div>
@@ -170,6 +205,17 @@ export const AskMyJournal: React.FC<AskMyJournalProps> = ({ entries, onSelectEnt
           <div className="prose prose-stone prose-sm max-w-none text-stone-800 leading-relaxed font-sans whitespace-pre-wrap">
             {answer}
           </div>
+        </div>
+      )}
+
+      {/* Empty State */}
+      {!answer && !loading && entries.length === 0 && (
+        <div className="text-center py-12 bg-white rounded-2xl border border-stone-200/80 p-8 space-y-3">
+          <BookOpen className="w-8 h-8 text-stone-400 mx-auto" />
+          <h4 className="font-serif text-stone-800 text-base font-medium">Your journal archive is empty</h4>
+          <p className="text-xs text-stone-500 max-w-md mx-auto">
+            Create your first journal reflection using the &ldquo;New Reflection&rdquo; button, and Sanctuary AI will begin building your searchable memory timeline.
+          </p>
         </div>
       )}
     </div>

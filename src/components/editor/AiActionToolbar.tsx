@@ -5,11 +5,11 @@ import {
   FileText, 
   ListChecks, 
   Lightbulb, 
-  CheckCircle,
-  HelpCircle,
   BarChart3,
   Copy,
-  Check
+  Check,
+  AlertCircle,
+  ExternalLink
 } from 'lucide-react';
 import { useApi } from '../../hooks/useApi';
 import { AiMode } from '../../types';
@@ -30,6 +30,8 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
   const [loadingMode, setLoadingMode] = useState<AiMode | null>(null);
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [activeResultMode, setActiveResultMode] = useState<AiMode | null>(null);
+  const [modelUsed, setModelUsed] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,6 +51,7 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
     setError(null);
     setLoadingMode(mode);
     setAiResult(null);
+    setNotice(null);
 
     try {
       const data = await authenticatedFetch('/api/ai/process', {
@@ -59,12 +62,20 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
       if (data.result) {
         setAiResult(data.result);
         setActiveResultMode(mode);
+        setModelUsed(data.modelUsed || null);
+        if (data.notice) {
+          setNotice(data.notice);
+        }
         if (mode === 'summarize' && onApplySummary) {
           onApplySummary(data.result);
         }
       }
     } catch (err: any) {
-      setError(err?.message || 'Failed to process AI request.');
+      const raw = String(err?.message || err || '');
+      const clean = raw.includes('prepayment credits') || raw.includes('429')
+        ? 'Google AI Studio prepayment credits are depleted. Please visit https://ai.studio/projects to manage billing.'
+        : raw.replace(/All Gemini models in fallback ladder failed:\s*/i, '').trim();
+      setError(clean || 'Failed to process AI request.');
     } finally {
       setLoadingMode(null);
     }
@@ -112,9 +123,28 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
         })}
       </div>
 
+      {/* Notice Banner */}
+      {notice && (
+        <div className="p-3 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-900 text-xs flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>{notice}</span>
+          </div>
+          <a
+            href="https://ai.studio/projects"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 font-semibold text-amber-950 underline shrink-0"
+          >
+            AI Studio <ExternalLink className="w-3 h-3" />
+          </a>
+        </div>
+      )}
+
       {error && (
-        <div className="p-3 text-xs bg-rose-50 border border-rose-200 text-rose-700 rounded-lg">
-          {error}
+        <div className="p-3 text-xs bg-rose-50 border border-rose-200 text-rose-700 rounded-lg flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+          <span>{error}</span>
         </div>
       )}
 
@@ -125,8 +155,17 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-amber-600" />
               <span className="text-xs font-semibold uppercase tracking-wider text-amber-900">
-                Gemini AI Reflection &bull; {activeResultMode}
+                AI Reflection &bull; {activeResultMode}
               </span>
+              {modelUsed && (
+                <span className={`text-[10px] font-mono px-2 py-0.5 rounded ${
+                  modelUsed.includes('Local') || modelUsed.includes('Standby')
+                    ? 'bg-amber-200/80 text-amber-900 font-semibold'
+                    : 'bg-stone-200 text-stone-700'
+                }`}>
+                  {modelUsed}
+                </span>
+              )}
             </div>
 
             <div className="flex items-center gap-2">

@@ -40,6 +40,49 @@ export interface GenerateOptions {
 export interface FallbackResult {
   text: string;
   modelUsed: string;
+  isLocalFallback?: boolean;
+}
+
+/**
+ * Detects if the error is specifically related to depleted prepayment credits or billing exhaustion.
+ */
+export function isCreditDepletionError(err: any): boolean {
+  if (!err) return false;
+  const msg = String(err?.message || err?.error?.message || err || '').toLowerCase();
+  return (
+    msg.includes('prepayment credits') ||
+    msg.includes('credits are depleted') ||
+    msg.includes('resource_exhausted') ||
+    msg.includes('billing#prepay') ||
+    msg.includes('billing')
+  );
+}
+
+/**
+ * Extracts a clean, human-readable error description, stripping raw JSON strings.
+ */
+export function extractCleanErrorMessage(err: any): string {
+  if (!err) return 'Upstream service unavailable';
+  const raw = String(err?.message || err?.error?.message || err || '');
+  
+  if (isCreditDepletionError(err)) {
+    return 'Your Google AI Studio prepayment credits are depleted. Please manage your project billing at https://ai.studio/projects.';
+  }
+
+  try {
+    // Check if the raw message contains embedded JSON
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed?.error?.message) {
+        return parsed.error.message.trim();
+      }
+    }
+  } catch {
+    // Ignore JSON parse errors
+  }
+
+  return raw.replace(/All Gemini models in fallback ladder failed:\s*/i, '').trim();
 }
 
 /**
@@ -175,8 +218,10 @@ export async function generateWithFallback(
     }
   }
 
-  throw new Error(
-    `All Gemini models in fallback ladder failed: ${lastError?.message || 'Upstream service unavailable'}`
-  );
+  const cleanMsg = extractCleanErrorMessage(lastError);
+  const errorObj = new Error(cleanMsg);
+  (errorObj as any).isCreditsDepleted = isCreditDepletionError(lastError);
+  (errorObj as any).originalError = lastError;
+  throw errorObj;
 }
 
