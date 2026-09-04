@@ -12,6 +12,7 @@ export const MODEL_FALLBACK_LADDER = [
   'gemini-3.1-flash-lite',
   'gemini-flash-latest',
   'gemini-3.7-flash',
+  'gemini-3.8-flash',
 ];
 
 // In-memory circuit breaker cooldown to temporarily bypass models experiencing demand spikes
@@ -35,12 +36,53 @@ export interface GenerateOptions {
   systemInstruction?: string;
   temperature?: number;
   maxOutputTokens?: number;
+  responseMimeType?: string;
+  responseSchema?: any;
 }
 
 export interface FallbackResult {
   text: string;
   modelUsed: string;
   isLocalFallback?: boolean;
+}
+
+/**
+ * Robust JSON parser that handles markdown code blocks and raw JSON text.
+ */
+export function safeJsonParse<T = any>(text: string, fallback: T | null = null): T | null {
+  if (!text || typeof text !== 'string') return fallback;
+  const trimmed = text.trim();
+
+  // Try direct parse first
+  try {
+    return JSON.parse(trimmed) as T;
+  } catch {
+    // Continue to pattern extraction
+  }
+
+  // Look for ```json ... ``` blocks
+  const jsonBlockMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (jsonBlockMatch && jsonBlockMatch[1]) {
+    try {
+      return JSON.parse(jsonBlockMatch[1].trim()) as T;
+    } catch {
+      // Continue
+    }
+  }
+
+  // Look for first '{' and last '}'
+  const startIdx = trimmed.indexOf('{');
+  const endIdx = trimmed.lastIndexOf('}');
+  if (startIdx !== -1 && endIdx > startIdx) {
+    try {
+      const candidate = trimmed.substring(startIdx, endIdx + 1);
+      return JSON.parse(candidate) as T;
+    } catch {
+      // Continue
+    }
+  }
+
+  return fallback;
 }
 
 /**
@@ -142,7 +184,7 @@ function getOrderedCandidates(): string[] {
   return [...MODEL_FALLBACK_LADDER];
 }
 
-const MODEL_TIMEOUT_MS = 10_000; // 10s per model attempt to prevent hanging requests
+const MODEL_TIMEOUT_MS = 15_000; // 15s per model attempt to prevent hanging requests
 
 /**
  * Executes content generation across the resilient fallback ladder.
@@ -161,8 +203,15 @@ export async function generateWithFallback(
       const config: Record<string, any> = {
         systemInstruction: options.systemInstruction,
         temperature: options.temperature ?? 0.7,
-        maxOutputTokens: options.maxOutputTokens ?? 1500,
+        maxOutputTokens: options.maxOutputTokens ?? 2500,
       };
+
+      if (options.responseMimeType) {
+        config.responseMimeType = options.responseMimeType;
+      }
+      if (options.responseSchema) {
+        config.responseSchema = options.responseSchema;
+      }
 
       // For gemini-3.7-flash, cap thinking budget to keep fallback response immediate
       if (model.includes('3.7')) {

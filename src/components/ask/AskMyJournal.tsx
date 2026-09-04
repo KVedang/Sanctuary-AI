@@ -7,9 +7,12 @@ import {
   ShieldCheck, 
   AlertCircle,
   ExternalLink,
-  BookOpen
+  BookOpen,
+  Calendar,
+  HelpCircle,
+  Tag
 } from 'lucide-react';
-import { JournalEntry } from '../../types';
+import { JournalEntry, AskJournalResponse } from '../../types';
 import { useApi } from '../../hooks/useApi';
 
 interface AskMyJournalProps {
@@ -21,6 +24,7 @@ export const AskMyJournal: React.FC<AskMyJournalProps> = ({ entries }) => {
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
   const [answer, setAnswer] = useState<string | null>(null);
+  const [structuredData, setStructuredData] = useState<AskJournalResponse | null>(null);
   const [modelUsed, setModelUsed] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,9 +51,10 @@ export const AskMyJournal: React.FC<AskMyJournalProps> = ({ entries }) => {
     setLoading(true);
     setError(null);
     setAnswer(null);
+    setStructuredData(null);
     setNotice(null);
 
-    // Filter relevant excerpts strictly from the current user's local entries
+    // Filter relevant excerpts strictly from current user's local entries
     // This guarantees user data isolation before sending context to backend
     const excerpts = entries.slice(0, 15).map((e) => ({
       id: e.id,
@@ -68,12 +73,16 @@ export const AskMyJournal: React.FC<AskMyJournalProps> = ({ entries }) => {
         }),
       });
 
-      if (data.answer) {
+      setModelUsed(data.modelUsed);
+      if (data.notice) {
+        setNotice(data.notice);
+      }
+
+      if (data.structuredData) {
+        setStructuredData(data.structuredData);
+        setAnswer(data.structuredData.directAnswer || data.answer);
+      } else if (data.answer) {
         setAnswer(data.answer);
-        setModelUsed(data.modelUsed);
-        if (data.notice) {
-          setNotice(data.notice);
-        }
       }
     } catch (err: any) {
       setError(cleanErrorMessage(err));
@@ -182,8 +191,8 @@ export const AskMyJournal: React.FC<AskMyJournalProps> = ({ entries }) => {
       )}
 
       {/* Answer Output */}
-      {answer && (
-        <div className="p-6 sm:p-8 rounded-2xl bg-white border border-stone-200 shadow-xs space-y-4">
+      {(structuredData || answer) && (
+        <div className="p-6 sm:p-8 rounded-2xl bg-white border border-stone-200 shadow-xs space-y-6">
           <div className="flex items-center justify-between pb-3 border-b border-stone-100">
             <div className="flex items-center gap-2">
               <Compass className="w-5 h-5 text-emerald-600" />
@@ -202,14 +211,74 @@ export const AskMyJournal: React.FC<AskMyJournalProps> = ({ entries }) => {
             )}
           </div>
 
+          {/* Main Answer text */}
           <div className="prose prose-stone prose-sm max-w-none text-stone-800 leading-relaxed font-sans whitespace-pre-wrap">
-            {answer}
+            {structuredData?.directAnswer || answer}
           </div>
+
+          {/* Citations & Historical References */}
+          {structuredData && structuredData.citations && structuredData.citations.length > 0 && (
+            <div className="p-4 rounded-xl bg-stone-50 border border-stone-200/70 space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-stone-700 uppercase tracking-wide">
+                <Calendar className="w-3.5 h-3.5 text-stone-500" />
+                <span>Referenced Reflections</span>
+              </div>
+              <div className="space-y-1.5">
+                {structuredData.citations.map((c, idx) => (
+                  <div key={idx} className="flex items-center justify-between text-xs text-stone-700 bg-white p-2 rounded-lg border border-stone-200">
+                    <span className="font-medium text-stone-900">{c.entryTitle || 'Reflection Entry'}</span>
+                    <span className="text-[11px] text-stone-400 font-mono">{c.entryDate || ''}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Relevant Themes */}
+          {structuredData && structuredData.relevantThemes && structuredData.relevantThemes.length > 0 && (
+            <div className="space-y-1.5">
+              <span className="text-[11px] font-semibold text-stone-400 uppercase tracking-wider block">
+                Related Themes:
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {structuredData.relevantThemes.map((theme, idx) => (
+                  <span key={idx} className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs bg-amber-50 text-amber-900 border border-amber-200 font-medium">
+                    <Tag className="w-3 h-3 text-amber-600" />
+                    {theme}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Follow-Up Inquiries */}
+          {structuredData && structuredData.followUpQuestions && structuredData.followUpQuestions.length > 0 && (
+            <div className="p-4 rounded-xl bg-amber-50/50 border border-amber-200/60 space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-900 uppercase tracking-wide">
+                <HelpCircle className="w-3.5 h-3.5 text-amber-600" />
+                <span>Deepening Questions to Consider</span>
+              </div>
+              <div className="space-y-1.5">
+                {structuredData.followUpQuestions.map((fq, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => {
+                      setQuestion(fq);
+                      handleAsk(fq);
+                    }}
+                    className="w-full text-left text-xs text-stone-700 hover:text-amber-950 p-2 rounded-lg bg-white hover:bg-amber-100/50 border border-stone-200 transition cursor-pointer"
+                  >
+                    &ldquo;{fq}&rdquo;
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {/* Empty State */}
-      {!answer && !loading && entries.length === 0 && (
+      {!answer && !structuredData && !loading && entries.length === 0 && (
         <div className="text-center py-12 bg-white rounded-2xl border border-stone-200/80 p-8 space-y-3">
           <BookOpen className="w-8 h-8 text-stone-400 mx-auto" />
           <h4 className="font-serif text-stone-800 text-base font-medium">Your journal archive is empty</h4>

@@ -334,6 +334,7 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
       <AiActionToolbar
         title={title}
         content={content}
+        journalId={initialEntry?.id}
         onApplySummary={(sum) => setAiSummary(sum)}
       />
 

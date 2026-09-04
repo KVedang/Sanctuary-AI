@@ -108,6 +108,57 @@ export interface InsightDigest {
   generatedAt: string;
 }
 
+export interface GoalSuggestion {
+  hasGoal: boolean;
+  title?: string;
+  description?: string;
+  reason?: string;
+  priority?: 'low' | 'medium' | 'high';
+  tasks?: string[];
+}
+
+export interface StructuredReflection {
+  summary: string;
+  explicitStatements: string[];
+  inferredPatterns: string[];
+  suggestedPerspectives: string[];
+  themes: string[];
+  keyConcerns: string[];
+  emotions: string[];
+  thinkingPatterns: string[];
+  positiveObservations: string[];
+  growthAreas: string[];
+  actionableOpportunities: string[];
+  inquiryQuestions: string[];
+  goalSuggestion?: GoalSuggestion;
+}
+
+export interface GoalProgressCoaching {
+  goalId: string;
+  goalTitle: string;
+  completedSummary: string;
+  remainingSummary: string;
+  potentialObstacle: string;
+  recommendedNextStep: string;
+  suggestedSubtasks?: string[];
+  adjustments?: string;
+}
+
+export interface AskJournalCitation {
+  id?: string;
+  title: string;
+  date: string;
+  excerptSnippet?: string;
+}
+
+export interface AskJournalResponse {
+  answer: string;
+  citedEntries: AskJournalCitation[];
+  hasSufficientEvidence: boolean;
+  modelUsed?: string;
+  notice?: string;
+}
+
 export interface AIResponsePayload {
   result: string;
   mode: AiMode;
@@ -115,4 +166,5 @@ export interface AIResponsePayload {
   keyPoints?: string[];
   actionItems?: string[];
   suggestedGoals?: { title: string; description: string; priority: 'low' | 'medium' | 'high' }[];
+  structuredData?: StructuredReflection;
 }

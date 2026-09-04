@@ -8,12 +8,18 @@ import {
   Trash2, 
   AlertCircle,
   Flag,
-  Sparkles
+  Sparkles,
+  Loader2,
+  X,
+  ArrowRight,
+  ShieldCheck,
+  Check
 } from 'lucide-react';
 import { Goal, GoalTask } from '../../types';
 import { db } from '../../lib/firebase';
 import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
+import { useApi } from '../../hooks/useApi';
 import { sanitizePayload, formatDate } from '../../lib/utils';
 
 interface GoalListProps {
@@ -23,6 +29,7 @@ interface GoalListProps {
 
 export const GoalList: React.FC<GoalListProps> = ({ goals, onRefresh }) => {
   const { user } = useAuth();
+  const { authenticatedFetch } = useApi();
   const [showModal, setShowModal] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -31,6 +38,13 @@ export const GoalList: React.FC<GoalListProps> = ({ goals, onRefresh }) => {
   const [tasks, setTasks] = useState<GoalTask[]>([]);
   const [saving, setSaving] = useState(false);
   const [goalToDelete, setGoalToDelete] = useState<string | null>(null);
+
+  // AI Coaching State
+  const [coachingGoal, setCoachingGoal] = useState<Goal | null>(null);
+  const [coachingData, setCoachingData] = useState<any | null>(null);
+  const [loadingCoaching, setLoadingCoaching] = useState(false);
+  const [coachingError, setCoachingError] = useState<string | null>(null);
+  const [addedSubtasks, setAddedSubtasks] = useState<Set<string>>(new Set());
 
   const handleAddTask = () => {
     if (!taskInput.trim()) return;
@@ -126,6 +140,71 @@ export const GoalList: React.FC<GoalListProps> = ({ goals, onRefresh }) => {
     }
   };
 
+  // AI Progress Coaching Flow
+  const handleOpenCoaching = async (goal: Goal) => {
+    setCoachingGoal(goal);
+    setCoachingData(null);
+    setCoachingError(null);
+    setLoadingCoaching(true);
+    setAddedSubtasks(new Set());
+
+    try {
+      const data = await authenticatedFetch('/api/ai/goal-coach', {
+        method: 'POST',
+        body: JSON.stringify({ goal }),
+      });
+
+      if (data.coaching) {
+        setCoachingData(data.coaching);
+      }
+    } catch (err: any) {
+      console.error('Failed to fetch goal coaching:', err);
+      setCoachingError('Could not load progress coaching at this time.');
+    } finally {
+      setLoadingCoaching(false);
+    }
+  };
+
+  // User accepts and adds a suggested subtask to the goal
+  const handleAddSuggestedSubtask = async (subtaskTitle: string) => {
+    if (!user || !coachingGoal || addedSubtasks.has(subtaskTitle)) return;
+
+    const newTask: GoalTask = {
+      id: `task_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      title: subtaskTitle,
+      completed: false,
+    };
+
+    const updatedTasks = [...(coachingGoal.tasks || []), newTask];
+    const completedCount = updatedTasks.filter((t) => t.completed).length;
+    const newProgress = Math.round((completedCount / updatedTasks.length) * 100);
+
+    try {
+      const goalRef = doc(db, 'users', user.uid, 'goals', coachingGoal.id);
+      await setDoc(
+        goalRef,
+        sanitizePayload({
+          tasks: updatedTasks,
+          progress: newProgress,
+          updatedAt: new Date().toISOString(),
+        }),
+        { merge: true }
+      );
+
+      // Update local state
+      setCoachingGoal({
+        ...coachingGoal,
+        tasks: updatedTasks,
+        progress: newProgress,
+      });
+
+      setAddedSubtasks(new Set(addedSubtasks).add(subtaskTitle));
+      onRefresh();
+    } catch (err) {
+      console.error('Error adding suggested subtask:', err);
+    }
+  };
+
   return (
     <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
       {/* Header */}
@@ -135,7 +214,7 @@ export const GoalList: React.FC<GoalListProps> = ({ goals, onRefresh }) => {
             Actionable Goals &amp; Habits
           </h1>
           <p className="text-xs text-stone-500 mt-1">
-            Convert reflective thoughts and journaling into structured action items with progress tracking.
+            Convert reflective thoughts and journaling into structured action items with progress tracking and AI coaching.
           </p>
         </div>
 
@@ -169,7 +248,7 @@ export const GoalList: React.FC<GoalListProps> = ({ goals, onRefresh }) => {
           {goals.map((goal) => (
             <div
               key={goal.id}
-              className="p-6 rounded-2xl bg-white border border-stone-200/90 shadow-xs flex flex-col justify-between gap-5"
+              className="p-6 rounded-2xl bg-white border border-stone-200/90 shadow-xs flex flex-col justify-between gap-5 hover:border-stone-300 transition"
             >
               <div className="space-y-3">
                 <div className="flex items-start justify-between gap-2">
@@ -190,13 +269,26 @@ export const GoalList: React.FC<GoalListProps> = ({ goals, onRefresh }) => {
                     </h3>
                   </div>
 
-                  <button
-                    onClick={() => setGoalToDelete(goal.id)}
-                    className="text-stone-400 hover:text-rose-600 p-1 transition cursor-pointer"
-                    title="Delete Goal"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    {/* AI Coach Button */}
+                    <button
+                      id={`ai-coach-btn-${goal.id}`}
+                      onClick={() => handleOpenCoaching(goal)}
+                      className="flex items-center gap-1 text-[11px] text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2.5 py-1 rounded-lg transition font-medium cursor-pointer shadow-2xs"
+                      title="Get AI progress coaching"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                      <span>AI Coach</span>
+                    </button>
+
+                    <button
+                      onClick={() => setGoalToDelete(goal.id)}
+                      className="text-stone-400 hover:text-rose-600 p-1.5 transition cursor-pointer rounded-md hover:bg-stone-50"
+                      title="Delete Goal"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
 
                 {goal.description && (
@@ -255,15 +347,166 @@ export const GoalList: React.FC<GoalListProps> = ({ goals, onRefresh }) => {
                 )}
               </div>
 
-              <div className="text-[11px] text-stone-400 font-mono pt-3 border-t border-stone-100">
-                Created: {formatDate(goal.createdAt)}
+              <div className="flex items-center justify-between text-[11px] text-stone-400 font-mono pt-3 border-t border-stone-100">
+                <span>Created: {formatDate(goal.createdAt)}</span>
+                <span className="capitalize">{goal.status.replace('_', ' ')}</span>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* New Goal Modal */}
+      {/* AI PROGRESS COACHING MODAL */}
+      {coachingGoal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/50 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-stone-200 space-y-5 max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-amber-500" />
+                <div>
+                  <h3 className="font-serif font-bold text-stone-900 text-base">
+                    AI Progress Coaching
+                  </h3>
+                  <p className="text-xs text-stone-500 truncate max-w-xs">
+                    {coachingGoal.title}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setCoachingGoal(null)}
+                className="text-stone-400 hover:text-stone-700 p-1 rounded-md transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Loading state */}
+            {loadingCoaching && (
+              <div className="py-12 flex flex-col items-center justify-center gap-3">
+                <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
+                <p className="text-xs text-stone-600">Analyzing goal trajectory and obstacles...</p>
+              </div>
+            )}
+
+            {coachingError && (
+              <div className="p-3 text-xs bg-rose-50 border border-rose-200 text-rose-700 rounded-lg flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{coachingError}</span>
+              </div>
+            )}
+
+            {/* Coaching content */}
+            {coachingData && !loadingCoaching && (
+              <div className="space-y-4 text-xs">
+                {/* Completed summary */}
+                <div className="p-3.5 rounded-xl bg-emerald-50/60 border border-emerald-200/70 space-y-1">
+                  <span className="font-bold text-emerald-900 uppercase tracking-wide block text-[11px]">
+                    ✓ Accomplishments &amp; Completed Work
+                  </span>
+                  <p className="text-stone-800 leading-relaxed">
+                    {coachingData.completedSummary}
+                  </p>
+                </div>
+
+                {/* Remaining summary */}
+                <div className="p-3.5 rounded-xl bg-stone-50 border border-stone-200/70 space-y-1">
+                  <span className="font-bold text-stone-700 uppercase tracking-wide block text-[11px]">
+                    📋 Remaining Tasks Overview
+                  </span>
+                  <p className="text-stone-800 leading-relaxed">
+                    {coachingData.remainingSummary}
+                  </p>
+                </div>
+
+                {/* Obstacles & Friction */}
+                {coachingData.potentialObstacle && (
+                  <div className="p-3.5 rounded-xl bg-amber-50/60 border border-amber-200/70 space-y-1">
+                    <span className="font-bold text-amber-900 uppercase tracking-wide block text-[11px]">
+                      ⚠️ Potential Obstacle / Friction Point
+                    </span>
+                    <p className="text-stone-800 leading-relaxed">
+                      {coachingData.potentialObstacle}
+                    </p>
+                  </div>
+                )}
+
+                {/* Recommended Next Action */}
+                {coachingData.recommendedNextStep && (
+                  <div className="p-3.5 rounded-xl bg-sky-50/60 border border-sky-200/70 space-y-1">
+                    <span className="font-bold text-sky-900 uppercase tracking-wide block text-[11px]">
+                      🎯 Recommended Immediate Next Action
+                    </span>
+                    <p className="text-stone-800 leading-relaxed font-medium">
+                      {coachingData.recommendedNextStep}
+                    </p>
+                  </div>
+                )}
+
+                {/* Suggested Subtask Breakdowns */}
+                {Array.isArray(coachingData.suggestedSubtasks) && coachingData.suggestedSubtasks.length > 0 && (
+                  <div className="space-y-2 pt-2 border-t border-stone-100">
+                    <span className="font-bold text-stone-800 block text-[11px] uppercase tracking-wide">
+                      Suggested Micro-Tasks (User Approval Required):
+                    </span>
+                    <div className="space-y-1.5">
+                      {coachingData.suggestedSubtasks.map((subtask: string, idx: number) => {
+                        const isAdded = addedSubtasks.has(subtask);
+                        return (
+                          <div key={idx} className="flex items-center justify-between gap-2 p-2.5 bg-stone-50 rounded-xl border border-stone-200">
+                            <span className="text-stone-800 font-medium">{subtask}</span>
+                            <button
+                              onClick={() => handleAddSuggestedSubtask(subtask)}
+                              disabled={isAdded}
+                              className={`px-3 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition cursor-pointer shrink-0 ${
+                                isAdded 
+                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                  : 'bg-white hover:bg-stone-100 text-stone-800 border border-stone-300 shadow-2xs'
+                              }`}
+                            >
+                              {isAdded ? (
+                                <>
+                                  <Check className="w-3 h-3 text-emerald-600" />
+                                  <span>Added</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Plus className="w-3 h-3" />
+                                  <span>Add to Goal</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Coaching advice */}
+                {coachingData.coachingAdvice && (
+                  <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 text-stone-700 italic">
+                    "{coachingData.coachingAdvice}"
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Modal Footer */}
+            <div className="pt-3 border-t border-stone-100 flex justify-end">
+              <button
+                onClick={() => setCoachingGoal(null)}
+                className="px-4 py-2 text-xs font-semibold text-stone-700 hover:text-stone-950 bg-stone-100 hover:bg-stone-200 rounded-xl transition cursor-pointer"
+              >
+                Done Reviewing
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Goal Modal (Manual) */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/50 backdrop-blur-xs">
           <div className="w-full max-w-md bg-white rounded-2xl p-6 shadow-xl border border-stone-200 space-y-4">
