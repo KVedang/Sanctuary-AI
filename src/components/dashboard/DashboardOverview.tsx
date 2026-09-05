@@ -29,6 +29,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useApi } from '../../hooks/useApi';
 import { db } from '../../lib/firebase';
 import { doc, setDoc, collection } from 'firebase/firestore';
+import { AISuggestedGoal, SuggestedGoalData } from '../goals/AISuggestedGoal';
 
 interface DashboardOverviewProps {
   entries: JournalEntry[];
@@ -137,14 +138,6 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   const [goalError, setGoalError] = useState<string | null>(null);
   const [savingGoal, setSavingGoal] = useState(false);
 
-  // Edit suggested goal modal/inline state
-  const [isEditingGoal, setIsEditingGoal] = useState(false);
-  const [editTitle, setEditTitle] = useState('');
-  const [editReason, setEditReason] = useState('');
-  const [editPriority, setEditPriority] = useState<'low' | 'medium' | 'high'>('medium');
-  const [editTasks, setEditTasks] = useState<string[]>([]);
-  const [newTaskInput, setNewTaskInput] = useState('');
-
   const handleGenerateSuggestedGoal = async () => {
     const latestEntry = entries[0];
     if (!latestEntry || !latestEntry.content?.trim()) {
@@ -187,10 +180,6 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           sourceReflectionId: latestEntry.id,
         };
         setSuggestedGoal(newSug);
-        setEditTitle(newSug.title);
-        setEditReason(newSug.reason || newSug.description || '');
-        setEditPriority(newSug.priority || 'medium');
-        setEditTasks(newSug.tasks.map(t => t.title));
       } else if (data.data && data.data.goal === null) {
         setGoalError(data.data.reason || 'The reflection does not contain enough actionable information for a meaningful goal.');
       } else if (data.goalSuggestion?.hasGoal) {
@@ -210,10 +199,6 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           sourceReflectionId: latestEntry.id,
         };
         setSuggestedGoal(newSug);
-        setEditTitle(newSug.title);
-        setEditReason(newSug.reason || newSug.description || '');
-        setEditPriority(newSug.priority || 'medium');
-        setEditTasks(newSug.tasks.map(t => t.title));
       } else {
         setGoalError('No clear goal pattern detected in the latest reflection.');
       }
@@ -225,39 +210,77 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     }
   };
 
-  const handleAcceptGoal = async () => {
-    if (!user || !suggestedGoal || savingGoal) return;
+  const [isRegeneratingTasks, setIsRegeneratingTasks] = useState(false);
+
+  const handleRegenerateTasks = async () => {
+    if (!suggestedGoal || isRegeneratingTasks) return;
+    setIsRegeneratingTasks(true);
+    try {
+      const sourceEntry = entries.find(e => e.id === suggestedGoal.sourceReflectionId) || entries[0];
+      const res = await authenticatedFetch('/api/ai/regenerate-tasks', {
+        method: 'POST',
+        body: JSON.stringify({
+          goalTitle: suggestedGoal.title,
+          goalDescription: suggestedGoal.description || suggestedGoal.reason,
+          reflectionContext: sourceEntry?.content || '',
+        }),
+      });
+
+      if (res.tasks && Array.isArray(res.tasks)) {
+        setSuggestedGoal({
+          ...suggestedGoal,
+          tasks: res.tasks,
+          howToAchieve: res.howToAchieve || suggestedGoal.howToAchieve,
+        });
+      }
+    } catch (err: any) {
+      console.error('Error regenerating tasks on dashboard:', err);
+    } finally {
+      setIsRegeneratingTasks(false);
+    }
+  };
+
+  const handleAcceptGoal = async (customized?: SuggestedGoalData) => {
+    if (!user || (!suggestedGoal && !customized) || savingGoal) return;
     setSavingGoal(true);
     setGoalError(null);
 
+    const goalToSave = customized || suggestedGoal;
+    if (!goalToSave || !goalToSave.title) return;
+
     try {
       const goalRef = doc(collection(db, 'users', user.uid, 'goals'));
-      const tasksFormatted: GoalTask[] = suggestedGoal.tasks.map((task, idx) => ({
-        id: `task_${Date.now()}_${idx}`,
-        title: task.title,
-        description: task.description || '',
-        priority: task.priority || suggestedGoal.priority || 'medium',
-        completed: false,
-      }));
+      const tasksFormatted: GoalTask[] = (goalToSave.tasks || []).map((t, idx) => {
+        const title = typeof t === 'string' ? t : t.title;
+        const description = typeof t === 'string' ? '' : (t.description || '');
+        const priority = typeof t === 'string' ? (goalToSave.priority || 'medium') : (t.priority || goalToSave.priority || 'medium');
+        return {
+          id: `task_${Date.now()}_${idx}`,
+          title,
+          description,
+          priority,
+          completed: false,
+        };
+      });
 
       const newGoalData = {
         id: goalRef.id,
         userId: user.uid,
-        title: suggestedGoal.title,
-        description: suggestedGoal.description || suggestedGoal.reason || '',
-        reason: suggestedGoal.reason || '',
-        priority: suggestedGoal.priority || 'medium',
+        title: goalToSave.title,
+        description: goalToSave.description || goalToSave.reason || '',
+        reason: goalToSave.reason || '',
+        priority: goalToSave.priority || 'medium',
         status: 'in_progress',
         progress: 0,
-        howToAchieve: suggestedGoal.howToAchieve || [],
+        howToAchieve: goalToSave.howToAchieve || [],
         tasks: tasksFormatted,
-        extractedFromJournalId: suggestedGoal.sourceReflectionId || '',
+        extractedFromJournalId: goalToSave.sourceReflectionId || suggestedGoal?.sourceReflectionId || '',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
 
       await setDoc(goalRef, sanitizePayload(newGoalData));
-      setGoalFeedback('Goal and tasks saved to your Tracker! 🎉');
+      setGoalFeedback('Goal, plan, and actionable tasks saved to your Goals tab! 🎉');
       setTimeout(() => {
         setSuggestedGoal(null);
         setGoalFeedback(null);
@@ -270,55 +293,8 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     }
   };
 
-  const handleSaveEditedGoal = async () => {
-    if (!user || !editTitle.trim() || savingGoal) return;
-    setSavingGoal(true);
-    setGoalError(null);
-
-    try {
-      const goalRef = doc(collection(db, 'users', user.uid, 'goals'));
-      const tasksFormatted: GoalTask[] = editTasks.map((taskTitle, idx) => ({
-        id: `task_${Date.now()}_${idx}`,
-        title: taskTitle,
-        description: 'Actionable micro-step.',
-        priority: editPriority,
-        completed: false,
-      }));
-
-      const newGoalData = {
-        id: goalRef.id,
-        userId: user.uid,
-        title: editTitle.trim(),
-        description: editReason.trim() || suggestedGoal?.description || '',
-        reason: editReason.trim() || suggestedGoal?.reason || '',
-        priority: editPriority,
-        status: 'in_progress',
-        progress: 0,
-        howToAchieve: suggestedGoal?.howToAchieve || [],
-        tasks: tasksFormatted,
-        extractedFromJournalId: suggestedGoal?.sourceReflectionId || '',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      await setDoc(goalRef, sanitizePayload(newGoalData));
-      setGoalFeedback('Customized goal saved to your Tracker! 🎉');
-      setIsEditingGoal(false);
-      setTimeout(() => {
-        setSuggestedGoal(null);
-        setGoalFeedback(null);
-      }, 2500);
-    } catch (err: any) {
-      console.error('Error saving edited goal:', err);
-      setGoalError('Could not save goal to Firestore.');
-    } finally {
-      setSavingGoal(false);
-    }
-  };
-
   const handleDismissGoal = () => {
     setSuggestedGoal(null);
-    setIsEditingGoal(false);
     setGoalError(null);
     setGoalFeedback(null);
   };
@@ -441,294 +417,24 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
       {/* 3. AI SUGGESTED GOAL SECTION (WITH EMPTY STATE) */}
       {/* ========================================== */}
       {suggestedGoal ? (
-        <div className="p-6 rounded-2xl bg-white border-2 border-amber-300 shadow-xs space-y-4">
-          <div className="flex items-start justify-between gap-3 border-b border-amber-100 pb-3">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-amber-500 text-white flex items-center justify-center shadow-2xs">
-                <Target className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h4 className="font-serif font-bold text-stone-900 text-base">
-                    AI Suggested Goal
-                  </h4>
-                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase ${
-                    suggestedGoal.priority === 'high'
-                      ? 'bg-rose-100 text-rose-800 border border-rose-200'
-                      : suggestedGoal.priority === 'low'
-                      ? 'bg-stone-100 text-stone-700 border border-stone-200'
-                      : 'bg-amber-100 text-amber-800 border border-amber-200'
-                  }`}>
-                    {suggestedGoal.priority || 'medium'} priority
-                  </span>
-                </div>
-                <p className="text-xs text-stone-500">
-                  Extracted from your latest reflection. Requires your explicit confirmation.
-                </p>
-              </div>
-            </div>
-
-            <button
-              id="dashboard-dismiss-suggested-goal-btn"
-              onClick={handleDismissGoal}
-              className="p-1 rounded-md text-stone-400 hover:text-stone-700 transition cursor-pointer"
-              title="Dismiss suggestion"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Goal Details */}
-          {!isEditingGoal ? (
-            <div className="space-y-3">
-              <div>
-                <h5 className="font-serif text-base font-semibold text-stone-950">
-                  {suggestedGoal.title}
-                </h5>
-                {suggestedGoal.description && (
-                  <p className="text-xs text-stone-600 mt-0.5">
-                    {suggestedGoal.description}
-                  </p>
-                )}
-              </div>
-
-              {/* Why this goal */}
-              {suggestedGoal.reason && (
-                <div className="p-3 rounded-xl bg-amber-100/60 border border-amber-200/70 text-xs text-amber-950 space-y-0.5">
-                  <span className="font-bold block text-amber-900 uppercase tracking-wider text-[10px]">Why this goal</span>
-                  <p className="leading-relaxed font-sans">{suggestedGoal.reason}</p>
-                </div>
-              )}
-
-              {/* How to achieve it */}
-              {suggestedGoal.howToAchieve && suggestedGoal.howToAchieve.length > 0 && (
-                <div className="space-y-1.5 pt-1">
-                  <span className="text-xs font-semibold text-stone-800 block">
-                    How to achieve it
-                  </span>
-                  <div className="space-y-1.5">
-                    {suggestedGoal.howToAchieve.map((stepText, idx) => (
-                      <div key={idx} className="flex items-start gap-2 text-xs text-stone-700 bg-stone-50 p-2.5 rounded-xl border border-stone-200">
-                        <span className="text-amber-600 font-bold shrink-0">{idx + 1}.</span>
-                        <span className="font-sans leading-snug">{stepText}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Suggested Tasks */}
-              {suggestedGoal.tasks && suggestedGoal.tasks.length > 0 && (
-                <div className="space-y-2 pt-1">
-                  <span className="text-xs font-semibold text-stone-800 block">
-                    Suggested Tasks
-                  </span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    {suggestedGoal.tasks.map((task, idx) => (
-                      <div
-                        key={idx}
-                        className="p-3 rounded-xl bg-stone-50 border border-stone-200/90 text-xs text-stone-800 space-y-1"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-start gap-1.5">
-                            <span className="text-amber-500 font-bold">•</span>
-                            <span className="font-semibold text-stone-900 leading-snug">{task.title}</span>
-                          </div>
-                          <span className={`text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded shrink-0 border ${
-                            task.priority === 'high'
-                              ? 'bg-rose-50 text-rose-700 border-rose-200'
-                              : task.priority === 'low'
-                              ? 'bg-stone-100 text-stone-600 border-stone-200'
-                              : 'bg-amber-50 text-amber-800 border-amber-200'
-                          }`}>
-                            {task.priority}
-                          </span>
-                        </div>
-                        {task.description && (
-                          <p className="text-[11px] text-stone-600 pl-3 font-sans leading-relaxed">
-                            {task.description}
-                          </p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {goalFeedback && (
-                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span>{goalFeedback}</span>
-                </div>
-              )}
-
-              {goalError && (
-                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-medium flex items-center gap-1.5">
-                  <AlertCircle className="w-4 h-4 text-rose-600" />
-                  <span>{goalError}</span>
-                </div>
-              )}
-
-              {/* Action Buttons: Accept Goal, Edit Goal, Dismiss, Regenerate Tasks */}
-              <div className="pt-2 flex flex-wrap items-center gap-2.5 border-t border-stone-100">
-                <button
-                  id="dashboard-accept-suggested-goal-btn"
-                  onClick={handleAcceptGoal}
-                  disabled={savingGoal}
-                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 shadow-2xs disabled:opacity-50"
-                >
-                  {savingGoal ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Check className="w-3.5 h-3.5" />
-                  )}
-                  <span>Accept Goal</span>
-                </button>
-
-                <button
-                  id="dashboard-edit-suggested-goal-btn"
-                  onClick={() => setIsEditingGoal(true)}
-                  disabled={savingGoal}
-                  className="px-4 py-2 rounded-xl bg-white hover:bg-stone-50 text-stone-800 text-xs font-semibold border border-stone-300 transition cursor-pointer shadow-2xs"
-                >
-                  Edit Goal
-                </button>
-
-                <button
-                  id="dashboard-regenerate-suggested-goal-btn"
-                  onClick={handleGenerateSuggestedGoal}
-                  disabled={isGeneratingGoal || savingGoal}
-                  className="px-3 py-2 rounded-xl bg-white hover:bg-stone-50 text-stone-700 text-xs font-medium border border-stone-200 transition cursor-pointer shadow-2xs flex items-center gap-1.5"
-                >
-                  {isGeneratingGoal ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-stone-500" />
-                  ) : (
-                    <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                  )}
-                  <span>{isGeneratingGoal ? 'Regenerating...' : 'Regenerate Tasks'}</span>
-                </button>
-
-                <button
-                  onClick={handleDismissGoal}
-                  className="px-3 py-2 rounded-xl text-stone-500 hover:text-stone-800 text-xs font-medium transition cursor-pointer"
-                >
-                  Dismiss
-                </button>
-              </div>
-            </div>
-          ) : (
-            /* Inline Edit Form */
-            <div className="space-y-3 bg-stone-50 p-4 rounded-xl border border-stone-200">
-              <h5 className="font-serif font-semibold text-stone-900 text-xs uppercase tracking-wider">
-                Customize Suggested Goal
-              </h5>
-              <div>
-                <label className="text-[11px] font-medium text-stone-600 block mb-1">Goal Title</label>
-                <input
-                  type="text"
-                  value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  className="w-full text-xs p-2.5 rounded-lg border border-stone-300 bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
-                />
-              </div>
-
-              <div>
-                <label className="text-[11px] font-medium text-stone-600 block mb-1">Why this goal / Reason</label>
-                <input
-                  type="text"
-                  value={editReason}
-                  onChange={(e) => setEditReason(e.target.value)}
-                  className="w-full text-xs p-2.5 rounded-lg border border-stone-300 bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
-                />
-              </div>
-
-              <div className="flex items-center gap-3">
-                <label className="text-[11px] font-medium text-stone-600">Priority:</label>
-                {(['low', 'medium', 'high'] as const).map(p => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => setEditPriority(p)}
-                    className={`px-2.5 py-1 rounded-md text-xs uppercase font-semibold border transition cursor-pointer ${
-                      editPriority === p 
-                        ? 'bg-amber-500 text-white border-amber-500' 
-                        : 'bg-white text-stone-600 border-stone-300'
-                    }`}
-                  >
-                    {p}
-                  </button>
-                ))}
-              </div>
-
-              <div>
-                <label className="text-[11px] font-medium text-stone-600 block mb-1">
-                  Tasks ({editTasks.length})
-                </label>
-                <div className="space-y-1.5 mb-2">
-                  {editTasks.map((t, idx) => (
-                    <div key={idx} className="flex items-center gap-2 bg-white p-2 rounded-lg border border-stone-200">
-                      <span className="text-xs text-stone-700 flex-1">{t}</span>
-                      <button
-                        type="button"
-                        onClick={() => setEditTasks(prev => prev.filter((_, i) => i !== idx))}
-                        className="text-stone-400 hover:text-rose-600"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={newTaskInput}
-                    onChange={(e) => setNewTaskInput(e.target.value)}
-                    placeholder="Add an actionable micro-task..."
-                    className="flex-1 text-xs p-2 rounded-lg border border-stone-300 bg-white focus:outline-none"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newTaskInput.trim()) {
-                        e.preventDefault();
-                        setEditTasks([...editTasks, newTaskInput.trim()]);
-                        setNewTaskInput('');
-                      }
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (newTaskInput.trim()) {
-                        setEditTasks([...editTasks, newTaskInput.trim()]);
-                        setNewTaskInput('');
-                      }
-                    }}
-                    className="px-3 py-2 rounded-lg bg-stone-900 text-white text-xs font-medium"
-                  >
-                    Add
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 pt-2 border-t border-stone-200">
-                <button
-                  type="button"
-                  onClick={handleSaveEditedGoal}
-                  disabled={savingGoal || !editTitle.trim()}
-                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
-                >
-                  {savingGoal ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                  <span>Save Goal to Tracker</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsEditingGoal(false)}
-                  className="px-3 py-2 rounded-xl text-stone-600 text-xs font-medium hover:text-stone-900 cursor-pointer"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+        <AISuggestedGoal
+          id="dashboard-suggested-goal-card"
+          suggestion={{
+            title: suggestedGoal.title,
+            description: suggestedGoal.description,
+            reason: suggestedGoal.reason,
+            priority: suggestedGoal.priority,
+            howToAchieve: suggestedGoal.howToAchieve,
+            tasks: suggestedGoal.tasks,
+            sourceReflectionId: suggestedGoal.sourceReflectionId,
+          }}
+          onAccept={handleAcceptGoal}
+          onDismiss={handleDismissGoal}
+          onRegenerateTasks={handleRegenerateTasks}
+          isSaving={savingGoal}
+          isRegenerating={isRegeneratingTasks}
+          feedbackMessage={goalFeedback}
+        />
       ) : entries.length > 0 ? (
         /* Action to generate goal from reflection if no suggestion is loaded */
         <div className="p-5 rounded-2xl bg-white border border-amber-200/80 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">

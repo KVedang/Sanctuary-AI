@@ -25,6 +25,7 @@ import { db } from '../../lib/firebase';
 import { collection, doc, setDoc } from 'firebase/firestore';
 import { AiMode, StructuredReflection, GoalSuggestion, GoalTask } from '../../types';
 import { sanitizePayload } from '../../lib/utils';
+import { AISuggestedGoal, SuggestedGoalData } from '../goals/AISuggestedGoal';
 
 interface AiActionToolbarProps {
   title: string;
@@ -70,7 +71,6 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
   const actions: { id: AiMode; label: string; icon: any; isStructured?: boolean }[] = [
     { id: 'reflect', label: 'Reflect', icon: Sparkles, isStructured: true },
     { id: 'goal_generate', label: 'Generate Goal', icon: Target, isStructured: true },
-    { id: 'goal_coach', label: 'Extract Goals', icon: ListChecks, isStructured: true },
     { id: 'summarize', label: 'Summarize', icon: FileText },
     { id: 'brainstorm', label: 'Brainstorm', icon: Lightbulb },
     { id: 'analytical', label: 'Analyze', icon: BarChart3 },
@@ -171,19 +171,22 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
     }
   };
 
-  // 1. Accept Goal directly
-  const handleAcceptGoal = async () => {
-    if (!user || !activeSuggestion || goalAccepted || savingGoal) return;
+  // 1. Accept Goal directly or with customization
+  const handleAcceptGoal = async (customized?: SuggestedGoalData) => {
+    if (!user || (!activeSuggestion && !customized) || goalAccepted || savingGoal) return;
 
     setSavingGoal(true);
     setGoalFeedback(null);
 
+    const goalToSave = customized || activeSuggestion;
+    if (!goalToSave || !goalToSave.title) return;
+
     try {
       const goalRef = doc(collection(db, 'users', user.uid, 'goals'));
-      const tasksFormatted: GoalTask[] = (activeSuggestion.tasks || []).map((t, idx) => {
+      const tasksFormatted: GoalTask[] = (goalToSave.tasks || []).map((t, idx) => {
         const title = typeof t === 'string' ? t : t.title;
         const description = typeof t === 'string' ? '' : (t.description || '');
-        const priority = typeof t === 'string' ? (activeSuggestion.priority || 'medium') : (t.priority || activeSuggestion.priority || 'medium');
+        const priority = typeof t === 'string' ? (goalToSave.priority || 'medium') : (t.priority || goalToSave.priority || 'medium');
         return {
           id: `task_${Date.now()}_${idx}`,
           title,
@@ -196,13 +199,13 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
       const newGoal = {
         id: goalRef.id,
         userId: user.uid,
-        title: activeSuggestion.title || 'Personal Milestone',
-        description: activeSuggestion.description || activeSuggestion.reason || '',
-        reason: activeSuggestion.reason || '',
-        priority: activeSuggestion.priority || 'medium',
+        title: goalToSave.title || 'Personal Milestone',
+        description: goalToSave.description || goalToSave.reason || '',
+        reason: goalToSave.reason || '',
+        priority: goalToSave.priority || 'medium',
         status: 'in_progress',
         progress: 0,
-        howToAchieve: activeSuggestion.howToAchieve || [],
+        howToAchieve: goalToSave.howToAchieve || [],
         tasks: tasksFormatted,
         extractedFromJournalId: journalId || '',
         createdAt: new Date().toISOString(),
@@ -501,185 +504,48 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
 
       {/* AI-SUGGESTED GOAL BOX (Visual Separation between AI Suggestion and User Decision) */}
       {activeSuggestion && (
-        <div id="ai-suggested-goal-card" className="p-5 rounded-2xl bg-gradient-to-br from-amber-50/80 via-white to-orange-50/40 border-2 border-amber-300/80 shadow-sm relative space-y-4">
-          {/* Header */}
-          <div className="flex items-center justify-between pb-2 border-b border-amber-200/60">
-            <div className="flex items-center gap-2">
-              <Target className="w-5 h-5 text-amber-600" />
-              <h4 className="text-sm font-bold text-amber-950 tracking-tight">
-                AI Suggested Goal
-              </h4>
-              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-amber-200/70 text-amber-900">
-                {activeSuggestion.hasGoal ? `${activeSuggestion.priority || 'medium'} priority` : 'No Actionable Goal'}
-              </span>
+        activeSuggestion.hasGoal ? (
+          <AISuggestedGoal
+            id="ai-suggested-goal-card"
+            suggestion={{
+              title: activeSuggestion.title || 'Personal Milestone',
+              description: activeSuggestion.description,
+              reason: activeSuggestion.reason,
+              priority: activeSuggestion.priority,
+              howToAchieve: activeSuggestion.howToAchieve,
+              tasks: activeSuggestion.tasks || [],
+              sourceReflectionId: journalId,
+            }}
+            onAccept={handleAcceptGoal}
+            onDismiss={handleDismissGoal}
+            onRegenerateTasks={handleRegenerateTasks}
+            isSaving={savingGoal}
+            isRegenerating={isRegeneratingTasks}
+            feedbackMessage={goalFeedback}
+          />
+        ) : (
+          <div id="ai-suggested-goal-card" className="p-5 rounded-2xl bg-white border border-stone-200/80 shadow-xs space-y-2 relative">
+            <div className="flex items-center justify-between pb-2 border-b border-stone-100">
+              <div className="flex items-center gap-2">
+                <Target className="w-4 h-4 text-stone-400" />
+                <h4 className="text-sm font-bold text-stone-900 font-serif">AI Suggested Goal</h4>
+              </div>
+              <button
+                onClick={handleDismissGoal}
+                className="text-stone-400 hover:text-stone-700 p-1 rounded-md transition cursor-pointer"
+                title="Dismiss suggestion"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
-
-            <button
-              onClick={handleDismissGoal}
-              className="text-stone-400 hover:text-stone-700 p-1 rounded-md transition cursor-pointer"
-              title="Dismiss suggestion"
-            >
-              <X className="w-4 h-4" />
-            </button>
+            <p className="text-xs text-stone-600">
+              {activeSuggestion.reason || 'No actionable goal was detected in this reflection. The entry appears to focus primarily on emotional expression or contemplation.'}
+            </p>
+            <p className="text-[11px] text-stone-400">
+              You can always manually create a goal at any time in the <strong>Goals</strong> tab.
+            </p>
           </div>
-
-          {/* Goal Content */}
-          {activeSuggestion.hasGoal ? (
-            <div className="space-y-3">
-              <div>
-                <h5 className="text-base font-semibold text-stone-950 font-serif">
-                  {activeSuggestion.title}
-                </h5>
-                {activeSuggestion.description && (
-                  <p className="text-xs text-stone-600 mt-0.5">
-                    {activeSuggestion.description}
-                  </p>
-                )}
-              </div>
-
-              {/* Why statement */}
-              {activeSuggestion.reason && (
-                <div className="p-3 rounded-xl bg-amber-100/60 border border-amber-200/70 text-xs text-amber-950 space-y-1">
-                  <span className="font-bold block text-amber-900 uppercase tracking-wider text-[10px]">Why this goal</span>
-                  <p className="leading-relaxed font-sans">{activeSuggestion.reason}</p>
-                </div>
-              )}
-
-              {/* How to achieve it */}
-              {activeSuggestion.howToAchieve && activeSuggestion.howToAchieve.length > 0 && (
-                <div className="space-y-1.5 pt-1">
-                  <span className="text-xs font-semibold text-stone-800 block">
-                    How to achieve it
-                  </span>
-                  <div className="space-y-1.5">
-                    {activeSuggestion.howToAchieve.map((stepText, idx) => (
-                      <div key={idx} className="flex items-start gap-2 text-xs text-stone-700 bg-white/90 p-2.5 rounded-xl border border-amber-100">
-                        <span className="text-amber-600 font-bold shrink-0">{idx + 1}.</span>
-                        <span className="font-sans leading-snug">{stepText}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Tasks preview */}
-              {activeSuggestion.tasks && activeSuggestion.tasks.length > 0 && (
-                <div className="space-y-2 pt-1">
-                  <span className="text-xs font-semibold text-stone-800 block">
-                    Suggested Tasks
-                  </span>
-                  <div className="space-y-2">
-                    {activeSuggestion.tasks.map((taskItem, idx) => {
-                      const taskTitle = typeof taskItem === 'string' ? taskItem : taskItem.title;
-                      const taskDesc = typeof taskItem === 'string' ? '' : taskItem.description;
-                      const taskPriority = typeof taskItem === 'string' 
-                        ? (activeSuggestion.priority || 'medium') 
-                        : (taskItem.priority || activeSuggestion.priority || 'medium');
-                      return (
-                        <div key={idx} className="p-3 rounded-xl bg-white/95 border border-amber-200/80 shadow-2xs space-y-1">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex items-start gap-2">
-                              <span className="text-amber-500 font-mono text-sm leading-none mt-0.5">☐</span>
-                              <span className="font-semibold text-stone-900 text-xs leading-snug">{taskTitle}</span>
-                            </div>
-                            <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md shrink-0 border ${
-                              taskPriority === 'high'
-                                ? 'bg-rose-50 text-rose-700 border-rose-200'
-                                : taskPriority === 'low'
-                                ? 'bg-stone-50 text-stone-600 border-stone-200'
-                                : 'bg-amber-50 text-amber-800 border-amber-200'
-                            }`}>
-                              {taskPriority}
-                            </span>
-                          </div>
-                          {taskDesc && (
-                            <p className="text-[11px] text-stone-600 pl-4 font-sans leading-relaxed">
-                              {taskDesc}
-                            </p>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* User Decision Feedback */}
-              {goalFeedback && (
-                <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>{goalFeedback}</span>
-                </div>
-              )}
-
-              {/* User Decision Action Buttons */}
-              <div className="pt-2 flex flex-wrap items-center gap-2.5">
-                {!goalAccepted ? (
-                  <>
-                    <button
-                      id="ai-accept-goal-btn"
-                      onClick={handleAcceptGoal}
-                      disabled={savingGoal}
-                      className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 shadow-2xs disabled:opacity-50"
-                    >
-                      {savingGoal ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <Check className="w-3.5 h-3.5" />
-                      )}
-                      <span>Accept Goal</span>
-                    </button>
-
-                    <button
-                      id="ai-edit-goal-btn"
-                      onClick={handleOpenEditGoal}
-                      disabled={savingGoal}
-                      className="px-4 py-2 rounded-xl bg-white hover:bg-stone-50 text-stone-800 text-xs font-semibold border border-stone-300 transition cursor-pointer shadow-2xs"
-                    >
-                      Edit Goal
-                    </button>
-
-                    <button
-                      id="ai-regenerate-tasks-btn"
-                      onClick={handleRegenerateTasks}
-                      disabled={isRegeneratingTasks || savingGoal}
-                      className="px-3 py-2 rounded-xl bg-white hover:bg-stone-50 text-stone-700 text-xs font-medium border border-stone-200 transition cursor-pointer shadow-2xs flex items-center gap-1.5"
-                    >
-                      {isRegeneratingTasks ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-stone-500" />
-                      ) : (
-                        <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                      )}
-                      <span>{isRegeneratingTasks ? 'Regenerating...' : 'Regenerate Tasks'}</span>
-                    </button>
-
-                    <button
-                      id="ai-dismiss-goal-btn"
-                      onClick={handleDismissGoal}
-                      className="px-3 py-2 rounded-xl text-stone-500 hover:text-stone-800 text-xs font-medium transition cursor-pointer"
-                    >
-                      Dismiss
-                    </button>
-                  </>
-                ) : (
-                  <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700">
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Goal has been accepted and saved to your Goals tab!</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="text-xs text-stone-600 py-1 space-y-2">
-              <p>
-                No actionable goal was detected in this reflection. The entry appears to focus primarily on emotional expression or contemplation.
-              </p>
-              <p className="text-stone-400">
-                You can always manually create a goal at any time in the <strong>Goals</strong> tab.
-              </p>
-            </div>
-          )}
-        </div>
+        )
       )}
 
       {/* Standard Text Result (when not structured, e.g. Summarize, Brainstorm, Analyze) */}

@@ -44,7 +44,7 @@ export const LandingPage: React.FC = () => {
       <main className="flex-1 flex flex-col justify-center max-w-5xl mx-auto px-6 py-16 sm:py-24 text-center">
         <div className="inline-flex items-center gap-2 self-center px-3.5 py-1 rounded-full text-xs font-medium bg-stone-200/70 text-stone-700 mb-8 border border-stone-300/50">
           <Lock className="w-3.5 h-3.5 text-stone-600" />
-          <span>Zero-Knowledge Isolation &bull; Client-to-Cloud Encryption</span>
+          <span>Your reflections are securely stored and isolated to your account</span>
         </div>
 
         <h1 className="text-4xl sm:text-6xl font-serif font-medium tracking-tight text-stone-950 max-w-3xl mx-auto leading-[1.15]">
