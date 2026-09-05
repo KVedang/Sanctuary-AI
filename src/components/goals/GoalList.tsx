@@ -21,6 +21,7 @@ import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
 import { useApi } from '../../hooks/useApi';
 import { sanitizePayload, formatDate } from '../../lib/utils';
+import { AISuggestedGoal } from './AISuggestedGoal';
 
 interface GoalListProps {
   goals: Goal[];
@@ -506,9 +507,36 @@ export const GoalList: React.FC<GoalListProps> = ({
             className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium transition cursor-pointer flex items-center gap-1.5 shrink-0 shadow-2xs self-start sm:self-auto"
           >
             <Sparkles className="w-3.5 h-3.5" />
-            <span>{isAnalyzingJournal ? 'Analyzing...' : 'Generate from Reflection'}</span>
+            <span>{isAnalyzingJournal ? 'Analyzing...' : 'Generate Goal'}</span>
           </button>
         </div>
+
+        {/* Inline AI Suggested Goal card if available */}
+        {suggestedGoalResult && suggestedGoalResult.hasGoal && (
+          <div className="pt-2">
+            <AISuggestedGoal
+              id="goals-page-suggested-goal-card"
+              suggestion={{
+                title: suggestedGoalResult.title || 'Personal Milestone',
+                description: suggestedGoalResult.description,
+                reason: suggestedGoalResult.reason,
+                priority: suggestedGoalResult.priority,
+                howToAchieve: suggestedGoalResult.howToAchieve,
+                tasks: (suggestedGoalResult.tasks || []).map((t) => ({
+                  title: t,
+                  description: 'Actionable micro-step to advance this milestone.',
+                  priority: suggestedGoalResult.priority || 'medium',
+                })),
+                sourceReflectionId: selectedJournalId,
+              }}
+              onAccept={handleAcceptSuggestedGoal}
+              onDismiss={() => setSuggestedGoalResult(null)}
+              onRegenerateTasks={handleRegenerateSugTasks}
+              isSaving={savingSuggestedGoal}
+              isRegenerating={isRegeneratingSugTasks}
+            />
+          </div>
+        )}
       </div>
 
       {/* My Goals Section */}
@@ -540,7 +568,7 @@ export const GoalList: React.FC<GoalListProps> = ({
                 className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium transition cursor-pointer flex items-center gap-1.5 shadow-2xs"
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>AI Suggest from Reflection</span>
+                <span>Generate Goal</span>
               </button>
               <button
                 onClick={() => setShowModal(true)}
@@ -1098,7 +1126,7 @@ export const GoalList: React.FC<GoalListProps> = ({
                     className="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-2 shadow-2xs"
                   >
                     <Sparkles className="w-4 h-4" />
-                    <span>Analyze Reflection &amp; Formulate Goal</span>
+                    <span>Generate Goal</span>
                   </button>
                 )}
 
@@ -1107,7 +1135,7 @@ export const GoalList: React.FC<GoalListProps> = ({
                   <div className="py-8 flex flex-col items-center justify-center gap-2.5 text-stone-500">
                     <Loader2 className="w-6 h-6 animate-spin text-amber-500" />
                     <p className="text-xs font-medium">
-                      Gemini is analyzing your reflection for actionable commitments...
+                      Gemini is formulating your goal from reflection...
                     </p>
                   </div>
                 )}
@@ -1130,129 +1158,27 @@ export const GoalList: React.FC<GoalListProps> = ({
 
                 {/* Suggested Goal Card (when hasGoal === true and not editing) */}
                 {suggestedGoalResult && suggestedGoalResult.hasGoal && !isEditingSuggestedGoal && (
-                  <div className="p-4 rounded-xl bg-amber-50/60 border border-amber-200 space-y-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <span
-                          className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full ${
-                            suggestedGoalResult.priority === 'high'
-                              ? 'bg-rose-100 text-rose-800'
-                              : suggestedGoalResult.priority === 'low'
-                              ? 'bg-stone-100 text-stone-600'
-                              : 'bg-amber-100 text-amber-800'
-                          }`}
-                        >
-                          {suggestedGoalResult.priority || 'medium'} priority
-                        </span>
-                        <h4 className="font-serif font-bold text-stone-900 text-base mt-1">
-                          {suggestedGoalResult.title}
-                        </h4>
-                      </div>
-                    </div>
-
-                    {suggestedGoalResult.description && (
-                      <p className="text-xs text-stone-700 leading-relaxed">
-                        {suggestedGoalResult.description}
-                      </p>
-                    )}
-
-                    {suggestedGoalResult.reason && (
-                      <div className="p-2.5 rounded-lg bg-amber-100/50 border border-amber-200/60 text-xs text-amber-900">
-                        <span className="font-bold">Why this goal? </span>
-                        <span>{suggestedGoalResult.reason}</span>
-                      </div>
-                    )}
-
-                    {/* How to Achieve It Steps */}
-                    {suggestedGoalResult.howToAchieve && suggestedGoalResult.howToAchieve.length > 0 && (
-                      <div className="space-y-1.5 pt-1">
-                        <span className="text-xs font-semibold text-stone-700 block">
-                          How to achieve it (Roadmap):
-                        </span>
-                        <div className="space-y-1">
-                          {suggestedGoalResult.howToAchieve.map((stepText, idx) => (
-                            <div
-                              key={idx}
-                              className="flex items-start gap-2 text-xs text-stone-800 bg-white/95 p-2 rounded-lg border border-amber-100"
-                            >
-                              <span className="text-amber-600 font-bold shrink-0">{idx + 1}.</span>
-                              <span className="font-sans leading-snug">{stepText}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Tasks Checklist */}
-                    {suggestedGoalResult.tasks && suggestedGoalResult.tasks.length > 0 && (
-                      <div className="space-y-1.5 pt-1">
-                        <span className="text-xs font-semibold text-stone-700 block">
-                          Suggested Micro-Tasks ({suggestedGoalResult.tasks.length}):
-                        </span>
-                        <div className="space-y-1">
-                          {suggestedGoalResult.tasks.map((taskText, idx) => (
-                            <div
-                              key={idx}
-                              className="flex items-start gap-2 text-xs text-stone-800 bg-white/95 p-2 rounded-lg border border-amber-100"
-                            >
-                              <span className="text-stone-400 font-mono">☐</span>
-                              <span className="font-sans leading-snug">{taskText}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Decision Action Buttons */}
-                    <div className="pt-2 flex flex-wrap items-center gap-2.5 border-t border-amber-200/50">
-                      <button
-                        id="modal-accept-suggested-goal-btn"
-                        onClick={handleAcceptSuggestedGoal}
-                        disabled={savingSuggestedGoal}
-                        className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 shadow-2xs disabled:opacity-50"
-                      >
-                        {savingSuggestedGoal ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <Check className="w-3.5 h-3.5" />
-                        )}
-                        <span>Accept Goal</span>
-                      </button>
-
-                      <button
-                        id="modal-edit-suggested-goal-btn"
-                        onClick={() => setIsEditingSuggestedGoal(true)}
-                        disabled={savingSuggestedGoal}
-                        className="px-4 py-2 rounded-xl bg-white hover:bg-stone-50 text-stone-800 text-xs font-semibold border border-stone-300 transition cursor-pointer shadow-2xs"
-                      >
-                        Edit Goal
-                      </button>
-
-                      <button
-                        id="modal-regenerate-suggested-tasks-btn"
-                        onClick={handleRegenerateSugTasks}
-                        disabled={isRegeneratingSugTasks || savingSuggestedGoal}
-                        className="px-3.5 py-2 rounded-xl bg-white hover:bg-stone-50 text-stone-700 text-xs font-medium border border-stone-200 transition cursor-pointer shadow-2xs flex items-center gap-1.5"
-                      >
-                        {isRegeneratingSugTasks ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin text-stone-500" />
-                        ) : (
-                          <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                        )}
-                        <span>{isRegeneratingSugTasks ? 'Regenerating...' : 'Regenerate Tasks'}</span>
-                      </button>
-
-                      <button
-                        id="modal-dismiss-suggested-goal-btn"
-                        onClick={() => {
-                          setSuggestedGoalResult(null);
-                        }}
-                        className="px-3 py-2 rounded-xl text-stone-500 hover:text-stone-800 text-xs font-medium transition cursor-pointer"
-                      >
-                        Dismiss
-                      </button>
-                    </div>
-                  </div>
+                  <AISuggestedGoal
+                    id="modal-suggested-goal-card"
+                    suggestion={{
+                      title: suggestedGoalResult.title || 'Personal Milestone',
+                      description: suggestedGoalResult.description,
+                      reason: suggestedGoalResult.reason,
+                      priority: suggestedGoalResult.priority,
+                      howToAchieve: suggestedGoalResult.howToAchieve,
+                      tasks: (suggestedGoalResult.tasks || []).map((t) => ({
+                        title: t,
+                        description: 'Actionable micro-step to advance this milestone.',
+                        priority: suggestedGoalResult.priority || 'medium',
+                      })),
+                      sourceReflectionId: selectedJournalId,
+                    }}
+                    onAccept={handleAcceptSuggestedGoal}
+                    onDismiss={() => setSuggestedGoalResult(null)}
+                    onRegenerateTasks={handleRegenerateSugTasks}
+                    isSaving={savingSuggestedGoal}
+                    isRegenerating={isRegeneratingSugTasks}
+                  />
                 )}
 
                 {/* Edit Suggested Goal Form */}

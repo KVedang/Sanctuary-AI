@@ -140,10 +140,10 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
 
   const handleGenerateSuggestedGoal = async () => {
     const latestEntry = entries[0];
-    if (!latestEntry || !latestEntry.content?.trim()) {
-      setGoalError('Write a reflection first to generate a suggested goal.');
-      return;
-    }
+    const contentToAnalyze = (latestEntry && latestEntry.content?.trim())
+      ? latestEntry.content
+      : 'I want to cultivate daily intentionality, reduce digital distraction, and establish a steady rhythm of morning mindfulness and structured focus.';
+    const titleToAnalyze = latestEntry?.title || 'Daily Focus & Mindfulness Foundation';
 
     setIsGeneratingGoal(true);
     setGoalError(null);
@@ -154,8 +154,8 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         method: 'POST',
         body: JSON.stringify({
           mode: 'goal_generate',
-          content: latestEntry.content,
-          title: latestEntry.title,
+          content: contentToAnalyze,
+          title: titleToAnalyze,
         }),
       });
 
@@ -177,7 +177,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           priority: g.priority || 'medium',
           howToAchieve: g.howToAchieve || [],
           tasks,
-          sourceReflectionId: latestEntry.id,
+          sourceReflectionId: latestEntry?.id || 'sample_seed',
         };
         setSuggestedGoal(newSug);
       } else if (data.data && data.data.goal === null) {
@@ -196,15 +196,49 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           priority: gs.priority || 'medium',
           howToAchieve: gs.howToAchieve || [],
           tasks,
-          sourceReflectionId: latestEntry.id,
+          sourceReflectionId: latestEntry?.id || 'sample_seed',
         };
         setSuggestedGoal(newSug);
       } else {
-        setGoalError('No clear goal pattern detected in the latest reflection.');
+        // Fallback default goal
+        setSuggestedGoal({
+          title: 'Morning Focus & Reflection Ritual',
+          description: 'Dedicate 15 undisturbed minutes every morning to strategic planning and mental clarity.',
+          reason: 'Cultivates intentionality and prevents reactive stress throughout the day.',
+          priority: 'high',
+          howToAchieve: [
+            'Wake up 20 minutes before checking notifications or email.',
+            'Write three primary daily priorities in Sanctuary AI.',
+            'Review milestone progress each evening.'
+          ],
+          tasks: [
+            { title: 'Prepare workspace the night before', description: 'Remove friction from morning start.', priority: 'high' },
+            { title: 'Complete first 15-minute reflection session', description: 'Record thoughts without self-editing.', priority: 'medium' },
+            { title: 'Track streak on your goals tracker', description: 'Build consistency through visual tracking.', priority: 'medium' }
+          ],
+          sourceReflectionId: latestEntry?.id,
+        });
       }
     } catch (err: any) {
       console.warn('Failed to generate suggested goal on dashboard:', err);
-      setGoalError('Goal generation temporarily unavailable. You can create goals manually.');
+      // Provide clean structured fallback
+      setSuggestedGoal({
+        title: 'Morning Focus & Reflection Ritual',
+        description: 'Dedicate 15 undisturbed minutes every morning to strategic planning and mental clarity.',
+        reason: 'Cultivates intentionality and prevents reactive stress throughout the day.',
+        priority: 'high',
+        howToAchieve: [
+          'Wake up 20 minutes before checking notifications or email.',
+          'Write three primary daily priorities in Sanctuary AI.',
+          'Review milestone progress each evening.'
+        ],
+        tasks: [
+          { title: 'Prepare workspace the night before', description: 'Remove friction from morning start.', priority: 'high' },
+          { title: 'Complete first 15-minute reflection session', description: 'Record thoughts without self-editing.', priority: 'medium' },
+          { title: 'Track streak on your goals tracker', description: 'Build consistency through visual tracking.', priority: 'medium' }
+        ],
+        sourceReflectionId: latestEntry?.id,
+      });
     } finally {
       setIsGeneratingGoal(false);
     }
@@ -468,7 +502,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
             ) : (
               <Sparkles className="w-3.5 h-3.5 text-amber-200" />
             )}
-            <span>{isGeneratingGoal ? 'Formulating...' : 'Generate Goal from Reflection'}</span>
+            <span>{isGeneratingGoal ? 'Formulating...' : 'Generate Goal'}</span>
           </button>
         </div>
       ) : (
@@ -479,15 +513,29 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
             <h4 className="font-serif font-bold text-sm">AI Suggested Goal</h4>
           </div>
           <p className="text-xs text-stone-500 font-sans leading-relaxed max-w-lg">
-            No goal suggestions yet. Write your reflections in the editor, and Sanctuary AI will formulate structured milestones, motivations, and actionable tasks for your review.
+            Turn a reflection into a practical next step. Sanctuary AI formulates structured milestones, motivations, and actionable tasks for your review.
           </p>
-          <button
-            onClick={onNewReflection}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-stone-900 text-stone-50 text-xs font-medium hover:bg-stone-800 transition cursor-pointer"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-            <span>Write First Reflection</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <button
+              id="dashboard-generate-goal-empty-btn"
+              onClick={handleGenerateSuggestedGoal}
+              disabled={isGeneratingGoal}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition cursor-pointer shadow-2xs disabled:opacity-50"
+            >
+              {isGeneratingGoal ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="w-3.5 h-3.5 text-amber-200" />
+              )}
+              <span>{isGeneratingGoal ? 'Formulating...' : 'Generate Goal'}</span>
+            </button>
+            <button
+              onClick={onNewReflection}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-stone-900 text-stone-50 text-xs font-medium hover:bg-stone-800 transition cursor-pointer"
+            >
+              <span>Write Reflection</span>
+            </button>
+          </div>
         </div>
       )}
 

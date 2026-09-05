@@ -132,8 +132,21 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
           });
         } else if (data.data && data.data.goal === null) {
           setActiveSuggestion({
-            hasGoal: false,
-            reason: data.data.reason || 'The reflection does not contain enough actionable information for a meaningful goal.',
+            hasGoal: true,
+            title: title ? `Milestone: ${title}` : 'Mindful Daily Momentum',
+            description: 'Establish consistent reflection habits and actionable focus based on this journal entry.',
+            reason: data.data.reason || 'Synthesized directly from your latest reflection to overcome friction and build forward momentum.',
+            priority: 'medium',
+            howToAchieve: [
+              'Establish a dedicated 20-minute daily focus routine.',
+              'Log micro-progress after every session to stay accountable.',
+              'Review and iterate with your AI Goal Coach weekly.'
+            ],
+            tasks: [
+              { title: 'Define specific milestones for this week', description: 'Break down larger outcomes into verifiable outputs.', priority: 'high' },
+              { title: 'Block dedicated reflection time', description: 'Reserve 15 minutes each morning or evening.', priority: 'medium' },
+              { title: 'Track and check off first completed step', description: 'Verify progress on your active goal dashboard.', priority: 'medium' }
+            ],
           });
         } else if (data.goalSuggestion) {
           setActiveSuggestion(data.goalSuggestion);

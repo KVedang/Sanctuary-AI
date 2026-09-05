@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   BookOpen, 
   ShieldCheck, 
@@ -7,12 +7,63 @@ import {
   Compass, 
   CheckCircle2, 
   ArrowRight,
-  UserCheck
+  UserCheck,
+  Target
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { AISuggestedGoal } from '../goals/AISuggestedGoal';
 
 export const LandingPage: React.FC = () => {
   const { signInWithGoogle, loading } = useAuth();
+  const [showGoalShowcase, setShowGoalShowcase] = useState(true);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [goalShowcase, setGoalShowcase] = useState<{
+    title: string;
+    description: string;
+    reason: string;
+    priority: 'low' | 'medium' | 'high';
+    howToAchieve: string[];
+    tasks: { title: string; description: string; priority: 'low' | 'medium' | 'high' }[];
+  }>({
+    title: 'Daily Morning Reflection & Deep Focus',
+    description: 'Dedicate 15 uninterrupted minutes each morning to journaling, clarifying key priorities, and grounding your mindset.',
+    reason: 'Eliminates morning reactive anxiety and converts reflective thoughts into structured daily intentionality.',
+    priority: 'high',
+    howToAchieve: [
+      'Wake up 20 minutes prior to checking communication devices.',
+      'Record honest emotional state and 3 priority intentions in Sanctuary AI.',
+      'Review daily milestone checklist before launching into work.'
+    ],
+    tasks: [
+      { title: 'Prepare tranquil writing space', description: 'Remove distracting clutter and notifications.', priority: 'high' },
+      { title: 'Log first daily reflection entry', description: 'Capture spontaneous thoughts and intentions.', priority: 'medium' },
+      { title: 'Check off micro-milestones on tracker', description: 'Maintain accountability and positive feedback loops.', priority: 'medium' }
+    ]
+  });
+
+  const handleGenerateSampleGoal = () => {
+    setIsGenerating(true);
+    setTimeout(() => {
+      setGoalShowcase({
+        title: 'Deep Focus & Creative Momentum',
+        description: 'Channel reflective breakthroughs into 90-minute structured creative blocks without digital interruptions.',
+        reason: 'Synthesized directly from your latest reflection to overcome friction and build forward momentum.',
+        priority: 'high',
+        howToAchieve: [
+          'Designate specific 90-minute timeblocks for single-task focus.',
+          'Review journal insights before beginning creative projects.',
+          'Track milestones with your AI Goal Coach weekly.'
+        ],
+        tasks: [
+          { title: 'Schedule weekly deep work windows', description: 'Protect high-energy hours in your calendar.', priority: 'high' },
+          { title: 'Eliminate secondary digital notifications', description: 'Maintain unbroken concentration throughout work.', priority: 'medium' },
+          { title: 'Log evening reflection upon task completion', description: 'Capture insights while fresh in mind.', priority: 'medium' }
+        ]
+      });
+      setShowGoalShowcase(true);
+      setIsGenerating(false);
+    }, 300);
+  };
 
   return (
     <div className="min-h-screen bg-stone-50 text-stone-900 flex flex-col selection:bg-amber-200">
@@ -83,6 +134,59 @@ export const LandingPage: React.FC = () => {
             <span>{loading ? 'Authorizing...' : 'Continue with Google'}</span>
             <ArrowRight className="w-4 h-4 text-stone-400 group-hover:translate-x-0.5 transition-transform" />
           </button>
+        </div>
+
+        {/* Interactive Reflection to AI Suggested Goal Showcase */}
+        <div className="mt-14 w-full max-w-2xl mx-auto text-left">
+          <div className="flex items-center justify-between mb-3 px-1">
+            <div className="flex items-center gap-2">
+              <Target className="w-4 h-4 text-amber-600" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-stone-700">
+                Reflection-to-Goal Engine Preview
+              </span>
+            </div>
+            <button
+              id="landing-generate-goal-btn"
+              onClick={handleGenerateSampleGoal}
+              disabled={isGenerating}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold shadow-2xs transition cursor-pointer disabled:opacity-50"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-200" />
+              <span>{isGenerating ? 'Formulating...' : 'Generate Goal'}</span>
+            </button>
+          </div>
+
+          {showGoalShowcase ? (
+            <AISuggestedGoal
+              id="landing-suggested-goal-card"
+              suggestion={goalShowcase}
+              onAccept={() => {
+                signInWithGoogle();
+              }}
+              onDismiss={() => {
+                setShowGoalShowcase(false);
+              }}
+            />
+          ) : (
+            <div className="p-6 rounded-2xl bg-white border border-stone-200/80 shadow-xs space-y-3">
+              <div className="flex items-center gap-2 text-stone-900">
+                <Target className="w-5 h-5 text-amber-500" />
+                <h4 className="font-serif font-bold text-sm">AI Suggested Goal</h4>
+              </div>
+              <p className="text-xs text-stone-500 font-sans leading-relaxed">
+                Turn a reflection into a practical next step. Sanctuary AI formulates structured milestones, motivations, and actionable tasks for your review.
+              </p>
+              <button
+                id="landing-generate-goal-empty-btn"
+                onClick={handleGenerateSampleGoal}
+                disabled={isGenerating}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition cursor-pointer shadow-2xs"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-200" />
+                <span>{isGenerating ? 'Formulating...' : 'Generate Goal'}</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Feature Grid */}

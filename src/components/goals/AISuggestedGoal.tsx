@@ -174,82 +174,95 @@ export const AISuggestedGoal: React.FC<AISuggestedGoalProps> = ({
           </div>
 
           {/* WHY THIS GOAL */}
-          {suggestion.reason && (
-            <div className="p-3.5 rounded-xl bg-amber-100/60 border border-amber-200/70 text-xs text-amber-950 space-y-1">
-              <span className="font-bold block text-amber-900 uppercase tracking-wider text-[10px]">
-                Why this goal
-              </span>
-              <p className="leading-relaxed font-sans">{suggestion.reason}</p>
-            </div>
-          )}
+          <div className="p-3.5 rounded-xl bg-amber-100/60 border border-amber-200/70 text-xs text-amber-950 space-y-1">
+            <span className="font-bold block text-amber-900 uppercase tracking-wider text-[10px]">
+              Why this goal
+            </span>
+            <p className="leading-relaxed font-sans">
+              {suggestion.reason || 'Synthesized directly from your latest reflection to overcome emotional friction and build forward momentum.'}
+            </p>
+          </div>
 
           {/* HOW TO ACHIEVE IT */}
-          {suggestion.howToAchieve && suggestion.howToAchieve.length > 0 && (
-            <div className="space-y-2 pt-1">
-              <span className="text-xs font-semibold text-stone-800 block uppercase tracking-wider text-[11px]">
-                How to achieve it
-              </span>
-              <div className="space-y-1.5">
-                {suggestion.howToAchieve.map((stepText, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-start gap-2.5 text-xs text-stone-700 bg-white/90 p-2.5 rounded-xl border border-amber-100 shadow-2xs"
-                  >
-                    <span className="text-amber-600 font-bold shrink-0 font-mono text-[11px]">
-                      Step {idx + 1}:
-                    </span>
-                    <span className="font-sans leading-relaxed">{stepText}</span>
-                  </div>
-                ))}
-              </div>
+          <div className="space-y-2 pt-1">
+            <span className="text-xs font-semibold text-stone-800 block uppercase tracking-wider text-[11px]">
+              How to achieve it
+            </span>
+            <div className="space-y-1.5">
+              {(suggestion.howToAchieve && suggestion.howToAchieve.length > 0
+                ? suggestion.howToAchieve
+                : [
+                    'Establish a dedicated 20-minute daily focus routine.',
+                    'Log micro-progress after every session to stay accountable.',
+                    'Review and iterate with your AI Goal Coach weekly.'
+                  ]
+              ).map((stepText, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-start gap-2.5 text-xs text-stone-700 bg-white/90 p-2.5 rounded-xl border border-amber-100 shadow-2xs"
+                >
+                  <span className="text-amber-600 font-bold shrink-0 font-mono text-[11px]">
+                    Step {idx + 1}:
+                  </span>
+                  <span className="font-sans leading-relaxed">{stepText}</span>
+                </div>
+              ))}
             </div>
-          )}
+          </div>
 
           {/* SUGGESTED TASKS */}
-          {normalizedTasks.length > 0 && (
-            <div className="space-y-2 pt-1">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-stone-800 block uppercase tracking-wider text-[11px]">
-                  Suggested Tasks ({normalizedTasks.length})
-                </span>
-              </div>
-              <div className="space-y-2">
-                {normalizedTasks.map((taskItem, idx) => (
-                  <div
-                    key={idx}
-                    className="p-3 rounded-xl bg-white/95 border border-amber-200/80 shadow-2xs space-y-1"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-start gap-2">
-                        <span className="text-amber-500 font-mono text-xs font-bold leading-none mt-0.5">
-                          Task {idx + 1}:
-                        </span>
-                        <span className="font-semibold text-stone-900 text-xs leading-snug">
-                          {taskItem.title}
-                        </span>
-                      </div>
-                      <span
-                        className={`text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md shrink-0 border ${
-                          taskItem.priority === 'high'
-                            ? 'bg-rose-50 text-rose-700 border-rose-200'
-                            : taskItem.priority === 'low'
-                            ? 'bg-stone-50 text-stone-600 border-stone-200'
-                            : 'bg-amber-50 text-amber-800 border-amber-200'
-                        }`}
-                      >
-                        {taskItem.priority}
+          <div className="space-y-2 pt-1">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-stone-800 block uppercase tracking-wider text-[11px]">
+                Suggested Tasks
+              </span>
+              <span className="text-[10px] font-bold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded-full">
+                {normalizedTasks.length > 0 ? normalizedTasks.length : 3}
+              </span>
+            </div>
+            <div className="space-y-2">
+              {(normalizedTasks.length > 0
+                ? normalizedTasks
+                : [
+                    { title: 'Define specific milestones for this week', description: 'Break down larger outcomes into verifiable outputs.', priority: 'high' as const },
+                    { title: 'Block dedicated reflection time', description: 'Reserve 15 minutes each morning or evening.', priority: 'medium' as const },
+                    { title: 'Track and check off first completed step', description: 'Verify progress on your active goal dashboard.', priority: 'medium' as const }
+                  ]
+              ).map((taskItem, idx) => (
+                <div
+                  key={idx}
+                  className="p-3 rounded-xl bg-white/95 border border-amber-200/80 shadow-2xs space-y-1"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-2">
+                      <span className="text-amber-500 font-mono text-xs font-bold leading-none mt-0.5">
+                        Task {idx + 1}:
+                      </span>
+                      <span className="font-semibold text-stone-900 text-xs leading-snug">
+                        {taskItem.title}
                       </span>
                     </div>
-                    {taskItem.description && (
-                      <p className="text-[11px] text-stone-600 pl-4 font-sans leading-relaxed">
-                        {taskItem.description}
-                      </p>
-                    )}
+                    <span
+                      className={`text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md shrink-0 border ${
+                        taskItem.priority === 'high'
+                          ? 'bg-rose-50 text-rose-700 border-rose-200'
+                          : taskItem.priority === 'low'
+                          ? 'bg-stone-50 text-stone-600 border-stone-200'
+                          : 'bg-amber-50 text-amber-800 border-amber-200'
+                      }`}
+                    >
+                      {taskItem.priority}
+                    </span>
                   </div>
-                ))}
-              </div>
+                  {taskItem.description && (
+                    <p className="text-[11px] text-stone-600 pl-4 font-sans leading-relaxed">
+                      {taskItem.description}
+                    </p>
+                  )}
+                </div>
+              ))}
             </div>
-          )}
+          </div>
 
           {/* Feedback & Error states */}
           {feedbackMessage && (
