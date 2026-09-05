@@ -25,6 +25,7 @@ export const AskMyJournal: React.FC<AskMyJournalProps> = ({ entries }) => {
   const [loading, setLoading] = useState(false);
   const [answer, setAnswer] = useState<string | null>(null);
   const [structuredData, setStructuredData] = useState<AskJournalResponse | null>(null);
+  const [citedEntries, setCitedEntries] = useState<Array<{ id?: string; title?: string; entryTitle?: string; date?: string; entryDate?: string; excerptSnippet?: string }>>([]);
   const [modelUsed, setModelUsed] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +53,7 @@ export const AskMyJournal: React.FC<AskMyJournalProps> = ({ entries }) => {
     setError(null);
     setAnswer(null);
     setStructuredData(null);
+    setCitedEntries([]);
     setNotice(null);
 
     // Filter relevant excerpts strictly from current user's local entries
@@ -76,6 +78,12 @@ export const AskMyJournal: React.FC<AskMyJournalProps> = ({ entries }) => {
       setModelUsed(data.modelUsed);
       if (data.notice) {
         setNotice(data.notice);
+      }
+
+      if (Array.isArray(data.citedEntries) && data.citedEntries.length > 0) {
+        setCitedEntries(data.citedEntries);
+      } else if (data.structuredData?.citations) {
+        setCitedEntries(data.structuredData.citations);
       }
 
       if (data.structuredData) {
@@ -217,17 +225,24 @@ export const AskMyJournal: React.FC<AskMyJournalProps> = ({ entries }) => {
           </div>
 
           {/* Citations & Historical References */}
-          {structuredData && structuredData.citations && structuredData.citations.length > 0 && (
-            <div className="p-4 rounded-xl bg-stone-50 border border-stone-200/70 space-y-2">
+          {((citedEntries && citedEntries.length > 0) || (structuredData?.citations && structuredData.citations.length > 0)) && (
+            <div className="p-4 rounded-xl bg-stone-50 border border-stone-200/70 space-y-2.5">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-stone-700 uppercase tracking-wide">
                 <Calendar className="w-3.5 h-3.5 text-stone-500" />
-                <span>Referenced Reflections</span>
+                <span>Referenced Reflections ({citedEntries.length || structuredData?.citations?.length || 0})</span>
               </div>
-              <div className="space-y-1.5">
-                {structuredData.citations.map((c, idx) => (
-                  <div key={idx} className="flex items-center justify-between text-xs text-stone-700 bg-white p-2 rounded-lg border border-stone-200">
-                    <span className="font-medium text-stone-900">{c.entryTitle || 'Reflection Entry'}</span>
-                    <span className="text-[11px] text-stone-400 font-mono">{c.entryDate || ''}</span>
+              <div className="space-y-2">
+                {(citedEntries.length > 0 ? citedEntries : (structuredData?.citations || [])).map((c: any, idx: number) => (
+                  <div key={idx} className="text-xs text-stone-700 bg-white p-3 rounded-lg border border-stone-200 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-stone-900">{c.title || c.entryTitle || 'Reflection Entry'}</span>
+                      <span className="text-[11px] text-stone-400 font-mono">{c.date || c.entryDate || ''}</span>
+                    </div>
+                    {c.excerptSnippet && (
+                      <p className="text-[11px] text-stone-500 italic line-clamp-2">
+                        &ldquo;{c.excerptSnippet}&rdquo;
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>

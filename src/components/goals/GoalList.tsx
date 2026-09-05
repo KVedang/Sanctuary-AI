@@ -256,15 +256,39 @@ export const GoalList: React.FC<GoalListProps> = ({
     setSuggestedGoalResult(null);
 
     try {
-      const data = await authenticatedFetch('/api/ai/suggest-goal', {
+      const data = await authenticatedFetch('/api/ai/process', {
         method: 'POST',
         body: JSON.stringify({
+          mode: 'goal_generate',
           content: entry.content,
           title: entry.title,
         }),
       });
 
-      if (data.goalSuggestion) {
+      if (data.data?.goal) {
+        const g = data.data.goal;
+        const taskTitles = (data.data.tasks || []).map((t: any) => typeof t === 'string' ? t : t.title);
+        const suggestion: GoalSuggestion = {
+          hasGoal: true,
+          title: g.title,
+          description: g.description,
+          reason: g.reason,
+          priority: g.priority || 'medium',
+          howToAchieve: g.howToAchieve || [],
+          tasks: taskTitles,
+        };
+        setSuggestedGoalResult(suggestion);
+        setEditSugTitle(g.title || '');
+        setEditSugDescription(g.description || g.reason || '');
+        setEditSugPriority(g.priority || 'medium');
+        setEditSugHowToAchieve(g.howToAchieve ? [...g.howToAchieve] : []);
+        setEditSugTasks(taskTitles);
+      } else if (data.data && data.data.goal === null) {
+        setSuggestedGoalResult({
+          hasGoal: false,
+          reason: data.data.reason || 'The reflection does not contain enough actionable information for a meaningful goal.',
+        });
+      } else if (data.goalSuggestion) {
         setSuggestedGoalResult(data.goalSuggestion);
         setEditSugTitle(data.goalSuggestion.title || '');
         setEditSugDescription(data.goalSuggestion.description || data.goalSuggestion.reason || '');
@@ -1151,7 +1175,7 @@ export const GoalList: React.FC<GoalListProps> = ({
                         disabled={savingSuggestedGoal}
                         className="px-4 py-2 rounded-xl bg-white hover:bg-stone-50 text-stone-800 text-xs font-semibold border border-stone-300 transition cursor-pointer shadow-2xs"
                       >
-                        Edit Goal First
+                        Edit Goal
                       </button>
 
                       <button
@@ -1169,12 +1193,13 @@ export const GoalList: React.FC<GoalListProps> = ({
                       </button>
 
                       <button
+                        id="modal-dismiss-suggested-goal-btn"
                         onClick={() => {
                           setSuggestedGoalResult(null);
                         }}
                         className="px-3 py-2 rounded-xl text-stone-500 hover:text-stone-800 text-xs font-medium transition cursor-pointer"
                       >
-                        Try Another Reflection
+                        Dismiss
                       </button>
                     </div>
                   </div>

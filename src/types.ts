@@ -41,6 +41,7 @@ export type AiMode =
   | 'summarize' 
   | 'brainstorm' 
   | 'goal_coach' 
+  | 'goal_generate'
   | 'writing_assistant' 
   | 'analytical' 
   | 'ask_journal';
@@ -77,6 +78,8 @@ export interface GoalTask {
   title: string;
   completed: boolean;
   completedAt?: string;
+  description?: string;
+  priority?: 'low' | 'medium' | 'high';
 }
 
 export interface Goal {
@@ -84,6 +87,7 @@ export interface Goal {
   userId: string;
   title: string;
   description: string;
+  reason?: string;
   priority: 'low' | 'medium' | 'high';
   status: 'not_started' | 'in_progress' | 'completed' | 'abandoned';
   progress: number; // 0 to 100
@@ -109,6 +113,12 @@ export interface InsightDigest {
   generatedAt: string;
 }
 
+export interface GoalSuggestionTask {
+  title: string;
+  description: string;
+  priority: 'low' | 'medium' | 'high';
+}
+
 export interface GoalSuggestion {
   hasGoal: boolean;
   title?: string;
@@ -116,7 +126,27 @@ export interface GoalSuggestion {
   reason?: string;
   priority?: 'low' | 'medium' | 'high';
   howToAchieve?: string[];
-  tasks?: string[];
+  tasks?: (string | GoalSuggestionTask)[];
+}
+
+export interface GeneratedGoalTask {
+  title: string;
+  description: string;
+  priority: 'low' | 'medium' | 'high';
+}
+
+export interface GeneratedGoal {
+  title: string;
+  description: string;
+  reason: string;
+  priority: 'low' | 'medium' | 'high';
+  howToAchieve: string[];
+}
+
+export interface GeneratedGoalResult {
+  goal: GeneratedGoal | null;
+  tasks: GeneratedGoalTask[];
+  reason?: string;
 }
 
 export interface StructuredReflection {

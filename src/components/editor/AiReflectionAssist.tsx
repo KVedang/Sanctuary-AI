@@ -236,6 +236,29 @@ export const AiReflectionAssist: React.FC<AiReflectionAssistProps> = ({
               </div>
             </div>
 
+            {/* Adaptive Prompt Starters */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              <span className="text-[11px] text-stone-500 font-medium mr-1">Suggested inquiries:</span>
+              {[
+                "What has been occupying your mind?",
+                "What was the most challenging interaction today?",
+                "What is a decision I've been wrestling with?",
+                "Where did I find gratitude or unexpected calm?",
+              ].map((starter, sIdx) => (
+                <button
+                  key={sIdx}
+                  type="button"
+                  onClick={() => {
+                    setThoughtInput(starter);
+                    handleExploreThought(starter);
+                  }}
+                  className="text-[11px] px-2.5 py-1 rounded-full bg-white hover:bg-amber-100/70 text-stone-700 hover:text-stone-900 border border-stone-200 transition cursor-pointer shadow-2xs"
+                >
+                  {starter}
+                </button>
+              ))}
+            </div>
+
             {exploreError && (
               <p className="text-xs text-rose-600 font-medium pt-1">
                 {exploreError}

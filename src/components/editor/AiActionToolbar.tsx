@@ -69,6 +69,7 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
 
   const actions: { id: AiMode; label: string; icon: any; isStructured?: boolean }[] = [
     { id: 'reflect', label: 'Reflect', icon: Sparkles, isStructured: true },
+    { id: 'goal_generate', label: 'Generate Goal', icon: Target, isStructured: true },
     { id: 'goal_coach', label: 'Extract Goals', icon: ListChecks, isStructured: true },
     { id: 'summarize', label: 'Summarize', icon: FileText },
     { id: 'brainstorm', label: 'Brainstorm', icon: Lightbulb },
@@ -89,7 +90,7 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
     setGoalFeedback(null);
     setNotice(null);
 
-    const isStructured = mode === 'reflect' || mode === 'goal_coach';
+    const isStructured = mode === 'reflect' || mode === 'goal_coach' || mode === 'goal_generate';
 
     try {
       const data = await authenticatedFetch('/api/ai/process', {
@@ -106,6 +107,38 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
       setModelUsed(data.modelUsed || null);
       if (data.notice) {
         setNotice(data.notice);
+      }
+
+      if (mode === 'goal_generate') {
+        if (data.data?.goal) {
+          const g = data.data.goal;
+          const tasks = (data.data.tasks || []).map((t: any) => 
+            typeof t === 'string' 
+              ? { title: t, description: 'Actionable micro-step to advance this milestone.', priority: g.priority || 'medium' }
+              : { 
+                  title: t.title || 'Micro-action', 
+                  description: t.description || 'Actionable micro-step to advance this milestone.', 
+                  priority: t.priority || g.priority || 'medium' 
+                }
+          );
+          setActiveSuggestion({
+            hasGoal: true,
+            title: g.title,
+            description: g.description,
+            reason: g.reason,
+            priority: g.priority || 'medium',
+            howToAchieve: g.howToAchieve || [],
+            tasks,
+          });
+        } else if (data.data && data.data.goal === null) {
+          setActiveSuggestion({
+            hasGoal: false,
+            reason: data.data.reason || 'The reflection does not contain enough actionable information for a meaningful goal.',
+          });
+        } else if (data.goalSuggestion) {
+          setActiveSuggestion(data.goalSuggestion);
+        }
+        return;
       }
 
       if (data.structuredData) {
@@ -147,17 +180,25 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
 
     try {
       const goalRef = doc(collection(db, 'users', user.uid, 'goals'));
-      const tasksFormatted: GoalTask[] = (activeSuggestion.tasks || []).map((t, idx) => ({
-        id: `task_${Date.now()}_${idx}`,
-        title: t,
-        completed: false,
-      }));
+      const tasksFormatted: GoalTask[] = (activeSuggestion.tasks || []).map((t, idx) => {
+        const title = typeof t === 'string' ? t : t.title;
+        const description = typeof t === 'string' ? '' : (t.description || '');
+        const priority = typeof t === 'string' ? (activeSuggestion.priority || 'medium') : (t.priority || activeSuggestion.priority || 'medium');
+        return {
+          id: `task_${Date.now()}_${idx}`,
+          title,
+          description,
+          priority,
+          completed: false,
+        };
+      });
 
       const newGoal = {
         id: goalRef.id,
         userId: user.uid,
         title: activeSuggestion.title || 'Personal Milestone',
         description: activeSuggestion.description || activeSuggestion.reason || '',
+        reason: activeSuggestion.reason || '',
         priority: activeSuggestion.priority || 'medium',
         status: 'in_progress',
         progress: 0,
@@ -215,7 +256,7 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
     setEditDescription(activeSuggestion.description || activeSuggestion.reason || '');
     setEditPriority(activeSuggestion.priority || 'medium');
     setEditHowToAchieve(activeSuggestion.howToAchieve ? [...activeSuggestion.howToAchieve] : []);
-    setEditTasks(activeSuggestion.tasks ? [...activeSuggestion.tasks] : []);
+    setEditTasks(activeSuggestion.tasks ? activeSuggestion.tasks.map(t => typeof t === 'string' ? t : t.title) : []);
     setIsEditingGoal(true);
   };
 
@@ -229,6 +270,8 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
       const tasksFormatted: GoalTask[] = editTasks.map((t, idx) => ({
         id: `task_${Date.now()}_${idx}`,
         title: t,
+        description: 'Actionable milestone micro-step.',
+        priority: editPriority,
         completed: false,
       }));
 
@@ -237,6 +280,7 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
         userId: user.uid,
         title: editTitle.trim(),
         description: editDescription.trim(),
+        reason: activeSuggestion?.reason || '',
         priority: editPriority,
         status: 'in_progress',
         progress: 0,
@@ -495,21 +539,21 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
 
               {/* Why statement */}
               {activeSuggestion.reason && (
-                <div className="p-2.5 rounded-lg bg-amber-100/60 border border-amber-200/60 text-xs text-amber-900">
-                  <span className="font-bold">Why this goal? </span>
-                  <span>{activeSuggestion.reason}</span>
+                <div className="p-3 rounded-xl bg-amber-100/60 border border-amber-200/70 text-xs text-amber-950 space-y-1">
+                  <span className="font-bold block text-amber-900 uppercase tracking-wider text-[10px]">Why this goal</span>
+                  <p className="leading-relaxed font-sans">{activeSuggestion.reason}</p>
                 </div>
               )}
 
               {/* How to achieve it */}
               {activeSuggestion.howToAchieve && activeSuggestion.howToAchieve.length > 0 && (
                 <div className="space-y-1.5 pt-1">
-                  <span className="text-xs font-semibold text-stone-700 block">
-                    How to achieve it:
+                  <span className="text-xs font-semibold text-stone-800 block">
+                    How to achieve it
                   </span>
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     {activeSuggestion.howToAchieve.map((stepText, idx) => (
-                      <div key={idx} className="flex items-start gap-2 text-xs text-stone-700 bg-white/90 p-2 rounded-lg border border-amber-100">
+                      <div key={idx} className="flex items-start gap-2 text-xs text-stone-700 bg-white/90 p-2.5 rounded-xl border border-amber-100">
                         <span className="text-amber-600 font-bold shrink-0">{idx + 1}.</span>
                         <span className="font-sans leading-snug">{stepText}</span>
                       </div>
@@ -520,17 +564,42 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
 
               {/* Tasks preview */}
               {activeSuggestion.tasks && activeSuggestion.tasks.length > 0 && (
-                <div className="space-y-1.5 pt-1">
-                  <span className="text-xs font-semibold text-stone-700 block">
-                    Suggested Tasks Checklist:
+                <div className="space-y-2 pt-1">
+                  <span className="text-xs font-semibold text-stone-800 block">
+                    Suggested Tasks
                   </span>
-                  <div className="space-y-1">
-                    {activeSuggestion.tasks.map((taskText, idx) => (
-                      <div key={idx} className="flex items-start gap-2 text-xs text-stone-700 bg-white/90 p-2 rounded-lg border border-amber-100">
-                        <span className="text-stone-400 font-mono">☐</span>
-                        <span className="font-sans leading-snug">{taskText}</span>
-                      </div>
-                    ))}
+                  <div className="space-y-2">
+                    {activeSuggestion.tasks.map((taskItem, idx) => {
+                      const taskTitle = typeof taskItem === 'string' ? taskItem : taskItem.title;
+                      const taskDesc = typeof taskItem === 'string' ? '' : taskItem.description;
+                      const taskPriority = typeof taskItem === 'string' 
+                        ? (activeSuggestion.priority || 'medium') 
+                        : (taskItem.priority || activeSuggestion.priority || 'medium');
+                      return (
+                        <div key={idx} className="p-3 rounded-xl bg-white/95 border border-amber-200/80 shadow-2xs space-y-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-start gap-2">
+                              <span className="text-amber-500 font-mono text-sm leading-none mt-0.5">☐</span>
+                              <span className="font-semibold text-stone-900 text-xs leading-snug">{taskTitle}</span>
+                            </div>
+                            <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md shrink-0 border ${
+                              taskPriority === 'high'
+                                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                : taskPriority === 'low'
+                                ? 'bg-stone-50 text-stone-600 border-stone-200'
+                                : 'bg-amber-50 text-amber-800 border-amber-200'
+                            }`}>
+                              {taskPriority}
+                            </span>
+                          </div>
+                          {taskDesc && (
+                            <p className="text-[11px] text-stone-600 pl-4 font-sans leading-relaxed">
+                              {taskDesc}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -567,7 +636,7 @@ export const AiActionToolbar: React.FC<AiActionToolbarProps> = ({
                       disabled={savingGoal}
                       className="px-4 py-2 rounded-xl bg-white hover:bg-stone-50 text-stone-800 text-xs font-semibold border border-stone-300 transition cursor-pointer shadow-2xs"
                     >
-                      Edit Goal First
+                      Edit Goal
                     </button>
 
                     <button

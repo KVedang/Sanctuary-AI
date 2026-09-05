@@ -449,7 +449,7 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({
               How can I support your reflection today?
             </h2>
             <p className="text-xs text-stone-500 mb-6 leading-relaxed">
-              Choose a reflective prompt below, or describe whatever is on your mind. Everything stays encrypted and isolated to your account.
+              Choose a reflective prompt below, or describe whatever is on your mind. Everything stays securely stored and isolated to your account.
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full text-left">

@@ -703,3 +703,66 @@ Based on what you've shared:
 
 What part of this feels most important to prioritize as you move through today?`;
 }
+
+/**
+ * Autonomous Local Goal Generation conforming to { goal, tasks } schema
+ */
+export function generateLocalGoalGenerate(content: string, title?: string): {
+  goal: {
+    title: string;
+    description: string;
+    reason: string;
+    priority: 'low' | 'medium' | 'high';
+    howToAchieve: string[];
+  } | null;
+  tasks: Array<{
+    title: string;
+    description: string;
+    priority: 'low' | 'medium' | 'high';
+  }>;
+  reason?: string;
+} {
+  const local = generateLocalGoalSuggestion(content, title);
+  if (!local.hasGoal || !local.title) {
+    return {
+      goal: null,
+      tasks: [],
+      reason: local.reason || 'The reflection does not contain enough actionable information or commitment for a meaningful goal.',
+    };
+  }
+
+  const tasks = (local.tasks || []).map((t, idx) => ({
+    title: t,
+    description: `Actionable micro-step ${idx + 1} to make immediate headway in 15-30 minutes.`,
+    priority: local.priority || 'medium',
+  }));
+
+  return {
+    goal: {
+      title: local.title,
+      description: local.description || 'Focus on deliberate, consistent action to advance this milestone.',
+      reason: local.reason || 'Grounded directly in the commitments observed in your journal reflection.',
+      priority: local.priority || 'medium',
+      howToAchieve: local.howToAchieve && local.howToAchieve.length > 0 ? local.howToAchieve : [
+        'Step 1: Set aside a dedicated 25-minute focus window today.',
+        'Step 2: Prepare the essential resources and clear distractions.',
+        'Step 3: Execute the first micro-task with undivided attention.',
+        'Step 4: Review progress and record observations in your reflection tracker.'
+      ],
+    },
+    tasks: tasks.length >= 3 ? tasks.slice(0, 5) : [
+      ...tasks,
+      {
+        title: 'Schedule a 20-minute uninterrupted work block',
+        description: 'Block out an exact calendar slot to focus without interruption.',
+        priority: local.priority || 'medium',
+      },
+      {
+        title: 'Document your completed milestone in your journal',
+        description: 'Capture wins and note any friction points for next time.',
+        priority: local.priority || 'medium',
+      },
+    ].slice(0, 5),
+  };
+}
+

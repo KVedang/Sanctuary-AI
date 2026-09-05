@@ -166,7 +166,7 @@ export const InsightsView: React.FC<InsightsViewProps> = ({ entries }) => {
             {entries.length} <span className="text-xs font-sans font-normal text-stone-500">entries saved</span>
           </div>
           <p className="text-[11px] text-stone-400">
-            Encrypted in your private Firestore collection under strict user-bound authorization.
+            Securely stored in your private Firestore collection under strict user-bound authorization.
           </p>
         </div>
       </div>

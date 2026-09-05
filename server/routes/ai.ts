@@ -17,13 +17,15 @@ import {
   SYSTEM_PERIODIC_REVIEW,
   SYSTEM_REFLECTION_EXPLORER,
   SYSTEM_REFLECTION_DRAFTER,
-  SYSTEM_TASK_REGENERATION
+  SYSTEM_TASK_REGENERATION,
+  SYSTEM_GOAL_GENERATE
 } from '../gemini/prompts';
 import { 
   synthesizeAskJournal, 
   generateLocalProcess, 
   generateLocalStructuredReflection,
   generateLocalGoalSuggestion,
+  generateLocalGoalGenerate,
   generateLocalGoalCoaching,
   generateLocalChatResponse, 
   generateLocalDigest,
@@ -53,6 +55,14 @@ aiRouter.get('/status', async (_req: Request, res: Response): Promise<void> => {
  * Supports both structured JSON responses and clean Markdown output.
  */
 aiRouter.post('/process', async (req: Request, res: Response): Promise<void> => {
+  // 1. Authenticate Firebase user & enforce identity strictly from verified token
+  const authenticatedUid = (req as any).user?.uid;
+  if (!authenticatedUid) {
+    res.status(401).json({ error: 'UNAUTHORIZED', message: 'User must be authenticated.' });
+    return;
+  }
+
+  // 2. Validate request (ignore any userId from body)
   const { mode, content, title, structured } = (req.body && typeof req.body === 'object') ? req.body : {} as any;
 
   if (!content || typeof content !== 'string' || !content.trim()) {
@@ -65,7 +75,7 @@ aiRouter.post('/process', async (req: Request, res: Response): Promise<void> => 
     return;
   }
 
-  const isStructuredRequested = structured === true || mode === 'reflect_deep' || mode === 'goal_extract';
+  const isStructuredRequested = structured === true || mode === 'reflect_deep' || mode === 'goal_extract' || mode === 'goal_generate';
 
   try {
     const { prompt, systemInstruction, isJson } = getPromptForMode(mode || 'reflect', content, title);
@@ -76,6 +86,120 @@ aiRouter.post('/process', async (req: Request, res: Response): Promise<void> => 
     }
 
     const result = await generateWithFallback(prompt, options);
+
+    // 3. Special handler for mode = "goal_generate"
+    if (mode === 'goal_generate') {
+      const parsed = safeJsonParse(result.text);
+
+      let goalObj = parsed && typeof parsed === 'object' ? parsed.goal : undefined;
+      let tasksArr = parsed && typeof parsed === 'object' ? parsed.tasks : undefined;
+
+      // Handle flat schema if Gemini returned top-level keys
+      if (!goalObj && parsed && typeof parsed === 'object' && parsed.title) {
+        goalObj = {
+          title: parsed.title,
+          description: parsed.description || '',
+          reason: parsed.reason || '',
+          priority: parsed.priority || 'medium',
+          howToAchieve: parsed.howToAchieve || [],
+        };
+      }
+
+      // If insufficient info indicated by model
+      if (parsed && (parsed.goal === null || parsed.hasGoal === false)) {
+        res.json({
+          success: true,
+          mode: 'goal_generate',
+          data: {
+            goal: null,
+            tasks: [],
+            reason: parsed.reason || 'The reflection does not contain enough actionable information for a meaningful goal.',
+          },
+          modelUsed: result.modelUsed,
+          isLocalFallback: false,
+        });
+        return;
+      }
+
+      // If model returned malformed output, fall back to autonomous local engine safely
+      if (!goalObj && (!Array.isArray(tasksArr) || tasksArr.length === 0)) {
+        const fallbackData = generateLocalGoalGenerate(content, title);
+        res.json({
+          success: true,
+          mode: 'goal_generate',
+          data: fallbackData,
+          modelUsed: result.modelUsed,
+          isLocalFallback: false,
+        });
+        return;
+      }
+
+      // Sanitize & validate goal
+      const sanitizedGoal = goalObj ? {
+        title: String(goalObj.title || 'Personal Action Milestone').trim(),
+        description: String(goalObj.description || '').trim(),
+        reason: String(goalObj.reason || 'Derived from commitments observed in your reflection.').trim(),
+        priority: (['low', 'medium', 'high'].includes(goalObj.priority) ? goalObj.priority : 'medium') as 'low' | 'medium' | 'high',
+        howToAchieve: Array.isArray(goalObj.howToAchieve) && goalObj.howToAchieve.length > 0
+          ? goalObj.howToAchieve.map((s: any) => String(s || '').trim()).filter((s: string) => s.length > 0).slice(0, 5)
+          : [
+              'Step 1: Set aside a dedicated 25-minute focus window.',
+              'Step 2: Prepare essential resources and eliminate distractions.',
+              'Step 3: Execute the first micro-task.',
+              'Step 4: Review progress and recalibrate in your journal.'
+            ],
+      } : null;
+
+      // Sanitize & validate tasks (ensure 3-5 tasks with title, description, priority)
+      let sanitizedTasks = Array.isArray(tasksArr) ? tasksArr.map((t: any, idx: number) => {
+        if (typeof t === 'string') {
+          return {
+            title: t.trim(),
+            description: `Micro-step ${idx + 1} to make immediate headway in 15-30 minutes.`,
+            priority: sanitizedGoal?.priority || 'medium',
+          };
+        }
+        return {
+          title: String(t.title || `Action Task ${idx + 1}`).trim(),
+          description: String(t.description || `Micro-step ${idx + 1} to make immediate headway in 15-30 minutes.`).trim(),
+          priority: (['low', 'medium', 'high'].includes(t.priority) ? t.priority : sanitizedGoal?.priority || 'medium') as 'low' | 'medium' | 'high',
+        };
+      }).filter((t: any) => t.title.length > 0) : [];
+
+      if (sanitizedGoal && sanitizedTasks.length < 3) {
+        sanitizedTasks = [
+          ...sanitizedTasks,
+          {
+            title: 'Schedule a 25-minute uninterrupted work block',
+            description: 'Block out an exact calendar slot to focus without distraction.',
+            priority: sanitizedGoal.priority,
+          },
+          {
+            title: 'Prepare required workspace and reference notes',
+            description: 'Gather materials in advance to eliminate task startup friction.',
+            priority: sanitizedGoal.priority,
+          },
+          {
+            title: 'Review first milestone and record observations in journal',
+            description: 'Capture wins and note any friction points for next time.',
+            priority: sanitizedGoal.priority,
+          }
+        ].slice(0, 5);
+      }
+
+      res.json({
+        success: true,
+        mode: 'goal_generate',
+        data: {
+          goal: sanitizedGoal,
+          tasks: sanitizedTasks.slice(0, 5),
+          reason: parsed?.reason || sanitizedGoal?.reason,
+        },
+        modelUsed: result.modelUsed,
+        isLocalFallback: false,
+      });
+      return;
+    }
 
     if (isJson || isStructuredRequested) {
       const parsed = safeJsonParse(result.text);
@@ -111,6 +235,22 @@ aiRouter.post('/process', async (req: Request, res: Response): Promise<void> => 
   } catch (err: any) {
     console.warn('[AiProcess] Live Gemini model unavailable. Activating Local Reflection Engine:', extractCleanErrorMessage(err));
     const creditsDepleted = isCreditDepletionError(err);
+
+    if (mode === 'goal_generate') {
+      const fallbackGoal = generateLocalGoalGenerate(content, title);
+      res.json({
+        success: true,
+        mode: 'goal_generate',
+        data: fallbackGoal,
+        modelUsed: 'Sanctuary Local Reflection Engine (Standby Mode)',
+        isLocalFallback: true,
+        creditDepleted: creditsDepleted,
+        notice: creditsDepleted
+          ? 'Google AI Studio prepayment credits are depleted. Goal generated seamlessly via standby local engine.'
+          : 'Generated via local standby reflection engine.',
+      });
+      return;
+    }
 
     if (isStructuredRequested || mode === 'reflect' || mode === 'reflect_deep' || mode === 'goal_extract' || mode === 'goal_coach') {
       const structuredData = generateLocalStructuredReflection(content, title);

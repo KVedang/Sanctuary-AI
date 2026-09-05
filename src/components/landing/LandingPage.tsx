@@ -96,7 +96,7 @@ export const LandingPage: React.FC = () => {
                 Absolute Data Isolation
               </h3>
               <p className="text-sm text-stone-600 leading-relaxed">
-                User-scoped Firestore subcollections and cryptographic token checks guarantee that only you can ever view or query your journals.
+                User-scoped Firestore subcollections and verified authentication tokens guarantee that only you can ever view or query your journals.
               </p>
             </div>
             <div className="mt-4 pt-4 border-t border-stone-100 flex items-center gap-1.5 text-xs text-stone-500 font-medium">
