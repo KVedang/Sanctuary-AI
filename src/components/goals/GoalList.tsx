@@ -476,33 +476,82 @@ export const GoalList: React.FC<GoalListProps> = ({
         </div>
       </div>
 
-      {/* Goal Cards Grid */}
-      {goals.length === 0 ? (
-        <div className="bg-white p-12 rounded-2xl border border-stone-200 text-center space-y-3">
-          <Target className="w-10 h-10 text-stone-300 mx-auto" />
-          <p className="text-sm font-medium text-stone-700">No active goals yet</p>
-          <p className="text-xs text-stone-400 max-w-sm mx-auto">
-            You can add goals manually or have Sanctuary AI analyze your journal reflections to suggest actionable goals and concrete micro-tasks.
-          </p>
-          <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
-            <button
-              id="empty-state-ai-suggest-btn"
-              onClick={handleOpenAiSuggestModal}
-              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium transition cursor-pointer flex items-center gap-1.5 shadow-2xs"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>AI Suggest from Reflection</span>
-            </button>
-            <button
-              onClick={() => setShowModal(true)}
-              className="px-4 py-2 rounded-xl bg-stone-900 text-stone-50 text-xs font-medium hover:bg-stone-800 transition cursor-pointer"
-            >
-              Create Manually
-            </button>
+      {/* AI Goal Suggestions Section */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-amber-700 flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+            <span>AI Goal Suggestions</span>
+          </h2>
+          {suggestedGoalResult && (
+            <span className="text-[11px] font-medium text-amber-600 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
+              Suggestion Ready
+            </span>
+          )}
+        </div>
+
+        <div className="p-4 rounded-2xl bg-amber-50/40 border border-amber-200/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="space-y-0.5">
+            <p className="text-xs font-medium text-stone-900">
+              Turn your journal reflections into structured, actionable milestones.
+            </p>
+            <p className="text-[11px] text-stone-500">
+              Gemini reviews recent reflections to suggest high-impact goals with step-by-step tasks.
+            </p>
+          </div>
+          <button
+            id="ai-suggest-section-btn"
+            onClick={handleOpenAiSuggestModal}
+            disabled={isAnalyzingJournal}
+            className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium transition cursor-pointer flex items-center gap-1.5 shrink-0 shadow-2xs self-start sm:self-auto"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>{isAnalyzingJournal ? 'Analyzing...' : 'Generate from Reflection'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* My Goals Section */}
+      <div className="space-y-4 pt-2">
+        <div className="flex items-center justify-between border-b border-stone-200/70 pb-2.5">
+          <div className="flex items-center gap-2">
+            <Target className="w-4 h-4 text-stone-500" />
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-stone-700">
+              My Goals
+            </h2>
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-stone-100 text-stone-600">
+              {goals.length}
+            </span>
           </div>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+
+        {/* Goal Cards Grid */}
+        {goals.length === 0 ? (
+          <div className="bg-white p-12 rounded-2xl border border-stone-200 text-center space-y-3">
+            <Target className="w-10 h-10 text-stone-300 mx-auto" />
+            <p className="text-sm font-medium text-stone-700">No active goals yet</p>
+            <p className="text-xs text-stone-400 max-w-sm mx-auto">
+              You can add goals manually or have Sanctuary AI analyze your journal reflections to suggest actionable goals and concrete micro-tasks.
+            </p>
+            <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
+              <button
+                id="empty-state-ai-suggest-btn"
+                onClick={handleOpenAiSuggestModal}
+                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium transition cursor-pointer flex items-center gap-1.5 shadow-2xs"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>AI Suggest from Reflection</span>
+              </button>
+              <button
+                onClick={() => setShowModal(true)}
+                className="px-4 py-2 rounded-xl bg-stone-900 text-stone-50 text-xs font-medium hover:bg-stone-800 transition cursor-pointer"
+              >
+                Create Manually
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {goals.map((goal) => (
             <div
               key={goal.id}
@@ -649,6 +698,7 @@ export const GoalList: React.FC<GoalListProps> = ({
           ))}
         </div>
       )}
+      </div>
 
       {/* AI PROGRESS COACHING MODAL */}
       {coachingGoal && (

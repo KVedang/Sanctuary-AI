@@ -667,36 +667,38 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         <h3 className="text-sm font-semibold uppercase tracking-wider text-stone-500 mb-3.5">
           Quick Reflective Actions
         </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+          <button
+            id="dashboard-new-reflection-btn"
+            onClick={onNewReflection}
+            className="p-4 rounded-xl bg-amber-500/10 border border-amber-300/90 hover:border-amber-500 hover:shadow-xs transition text-left cursor-pointer group"
+          >
+            <div className="w-8 h-8 rounded-lg bg-amber-500 text-white flex items-center justify-center mb-2.5 shadow-2xs">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <h4 className="font-serif font-semibold text-stone-900 text-sm group-hover:text-amber-800 transition flex items-center gap-1">
+              <span>New Reflection</span>
+              <ArrowRight className="w-3 h-3 text-amber-600" />
+            </h4>
+            <p className="text-xs text-stone-600 mt-1">
+              Capture your thoughts, emotional state, or daily intentions.
+            </p>
+          </button>
+
           <button
             id="dashboard-companion-btn"
             onClick={() => onNavigateTab('assistant')}
-            className="p-4 rounded-xl bg-amber-50/50 border border-amber-300/80 hover:border-amber-400 hover:shadow-xs transition text-left cursor-pointer group"
+            className="p-4 rounded-xl bg-white border border-stone-200 hover:border-amber-400 hover:shadow-xs transition text-left cursor-pointer group"
           >
-            <div className="w-8 h-8 rounded-lg bg-amber-400 text-stone-950 flex items-center justify-center mb-2.5 shadow-2xs">
+            <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center mb-2.5">
               <Bot className="w-4 h-4" />
             </div>
             <h4 className="font-serif font-semibold text-stone-900 text-sm group-hover:text-amber-800 transition flex items-center gap-1">
               <span>AI Companion</span>
               <ArrowRight className="w-3 h-3 text-amber-600" />
             </h4>
-            <p className="text-xs text-stone-600 mt-1">
-              Conversational reflection, empathetic listening &amp; guidance.
-            </p>
-          </button>
-
-          <button
-            onClick={onNewReflection}
-            className="p-4 rounded-xl bg-white border border-stone-200 hover:border-amber-400 hover:shadow-xs transition text-left cursor-pointer group"
-          >
-            <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center mb-2.5">
-              <Sparkles className="w-4 h-4" />
-            </div>
-            <h4 className="font-serif font-semibold text-stone-900 text-sm group-hover:text-amber-700 transition">
-              Deep Reflection
-            </h4>
             <p className="text-xs text-stone-500 mt-1">
-              Socratic inquiry into your challenges and emotional triggers.
+              Conversational reflection, empathetic listening &amp; guidance.
             </p>
           </button>
 
@@ -723,7 +725,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
               <Target className="w-4 h-4" />
             </div>
             <h4 className="font-serif font-semibold text-stone-900 text-sm group-hover:text-blue-700 transition">
-              Goal Coaching
+              Goals Tracker
             </h4>
             <p className="text-xs text-stone-500 mt-1">
               Break down reflections into realistic milestones &amp; tasks.
